@@ -6,24 +6,36 @@ const HAUTO_UI_ID = 'hauto-assistant-panel';
 // 1. Core initialization on page load
 initHAutoAssistant();
 
-// 💥 [Cross-Origin postMessage Listener]
-// Bypasses Same-Origin security policies by listening to direct postMessages from parent frame.
-// Reports its own frame's DOM data to background immediately upon receiving request.
+// 💥 [ 우주급 프레임 관통 릴레이 postMessage 수신기 ]
+// CORS(동종기원정책) 보안 장벽을 우회하여, 2중 및 N중 중첩 iframe까지도 신호를 릴레이 전파하여 모든 프레임의 데이터를 백그라운드로 전송합니다.
 window.addEventListener('message', (event) => {
   if (event.data && event.data.action === 'REQUEST_FRAME_REPORT_VIA_POSTMESSAGE') {
     try {
+      // 1단계: 자신의 로컬 DOM에서 이력서 정보를 긁어 백그라운드로 즉시 릴레이 전송
       const localData = scrapeLocalFrameData();
       chrome.runtime.sendMessage({
         action: 'SUBMIT_FRAME_REPORT',
         data: localData
       });
+
+      // 2단계: ⚡[릴레이 엔진] 자신의 DOM 자식들 중 또 다른 하위 iframe이 존재하면 똑같은 postMessage를 재전파!
+      const subIframes = document.querySelectorAll('iframe');
+      subIframes.forEach((sub) => {
+        try {
+          if (sub.contentWindow) {
+            sub.contentWindow.postMessage({ action: 'REQUEST_FRAME_REPORT_VIA_POSTMESSAGE' }, '*');
+          }
+        } catch (err) {
+          console.log('HAuto 하위 iframe 릴레이 전송 실패:', err.message);
+        }
+      });
     } catch (e) {
-      console.log('HAuto 하위 프레임 실시간 보고 전송 오류:', e.message);
+      console.log('HAuto 릴레이 수신 처리 중 오류:', e.message);
     }
   }
 });
 
-// Also keep standard runtime message listener as fallback
+// 크롬 표준 런타임 메시지 수신기 (동일 프레임 통신용)
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'REQUEST_FRAME_REPORT') {
     try {
@@ -34,7 +46,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       });
       sendResponse({ success: true });
     } catch (e) {
-      console.log('HAuto 런타임 메시지 보고 실패:', e.message);
+      console.log('HAuto 런타임 보고 오류:', e.message);
       sendResponse({ success: false, error: e.message });
     }
   }
@@ -42,7 +54,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 function initHAutoAssistant() {
-  // 💥 [Parent Frame Guard] Only inject floating UI into the top-level parent frame
+  // 💥 [부모 프레임 가드] 오직 최상단 창(top frame)에만 플로팅 비서 패널을 띄움
   if (window !== window.top) return;
 
   // Check if assistant is already injected
@@ -239,7 +251,7 @@ function bindPanelEvents(pageType) {
   }
 }
 
-// 4. Unified Data Requester Broker (Fires postMessage to bypass Same-Origin Restrictions in real time)
+// 4. Unified Data Requester Broker (Fires postMessage with recursive relay to capture nested cross-origin iframes)
 function requestMergedResumeData(callback) {
   // A. Direct report from top-level parent frame itself
   try {
@@ -252,7 +264,8 @@ function requestMergedResumeData(callback) {
     console.log('HAuto 부모 프레임 데이터 선제 보고 오류:', e.message);
   }
 
-  // B. 💥 [Same-Origin Bypasser] Send direct postMessage broadcasting to ALL iframe elements
+  // B. 💥 [Same-Origin Bypasser with Recursive Relay] 
+  // Send direct postMessage broadcasting to ALL top-level iframe elements in the parent DOM
   const iframes = document.querySelectorAll('iframe');
   iframes.forEach((iframe) => {
     try {
@@ -264,7 +277,7 @@ function requestMergedResumeData(callback) {
     }
   });
 
-  // C. Query background script for consolidated result (Background holds 150ms timeout to gather)
+  // C. Query background script for consolidated result (Background holds 350ms timeout to gather)
   chrome.runtime.sendMessage({ action: 'GET_MERGED_RESUME_DATA' }, (response) => {
     if (response && response.success && response.data) {
       callback(response.data);
@@ -495,10 +508,10 @@ function scrapeLocalFrameData() {
 
   // C. 💥 [Ultra-Precise Birth & Age Parser] Highly targeted Korean recruiting standard parser
   // Matches "남, 1978 (47세)", "여, 1989 (37세)", "1994 (32세)"
-  const commonAgePattern = /(19|20)\d{2}\s*\(\s*(\d{2})세\s*\)/;
+  const commonAgePattern = /((?:19|20)\d{2})\s*\(\s*(\d{2})세\s*\)/;
   const matchCommon = rawText.match(commonAgePattern);
   if (matchCommon) {
-    birth = matchCommon[1] + matchCommon[0].substring(2, 4) + "년"; // e.g. "1978년"
+    birth = matchCommon[1] + "년"; // e.g. "1978년"
     age = matchCommon[2] + "세"; // e.g. "47세"
   } else {
     // Fallbacks
@@ -522,8 +535,18 @@ function scrapeLocalFrameData() {
         if (birthMatch2) {
           birth = birthMatch2[0].replace(/-/g, '.');
         } else {
-          const birthMatch3 = rawText.match(/(\d{2,4})년생/);
-          if (birthMatch3) birth = birthMatch3[1] + "년생";
+          const birthMatch3 = rawText.match(/((?:19|20)\d{2})년생/);
+          if (birthMatch3) {
+            birth = birthMatch3[1] + "년생";
+          } else {
+            const birthMatch4 = rawText.match(/((?:19|20)\d{2})\s*년생/);
+            if (birthMatch4) {
+              birth = birthMatch4[1] + "년생";
+            } else {
+              const birthMatch5 = rawText.match(/\b((?:19|20)\d{2})\b/);
+              if (birthMatch5) birth = birthMatch5[1] + "년";
+            }
+          }
         }
       }
     }

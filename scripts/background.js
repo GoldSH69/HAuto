@@ -52,7 +52,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         const err = chrome.runtime.lastError;
       });
 
-      // 3. Wait for 150ms to gather all frame submissions, then merge and respond to top frame
+      // 3. Wait for 350ms to gather all frame submissions (including nested sub-frames), then merge and respond to top frame
       setTimeout(() => {
         const reports = Object.values(tabFramesData[tabId] || {});
         if (reports.length > 0) {
@@ -61,7 +61,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         } else {
           sendResponse({ success: false, error: '이력서 영역의 프레임 데이터를 수집하지 못했습니다. 화면을 한 번 클릭한 뒤 다시 시도해 주세요.' });
         }
-      }, 150);
+      }, 350);
     } else {
       sendResponse({ success: false, error: '활성화된 탭 정보를 찾을 수 없습니다.' });
     }
