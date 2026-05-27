@@ -62,13 +62,26 @@ function isContextValid() {
   }
 }
 
-// 💥 [Shadow DOM Penetrating Text Scraper]
-// Recursively extracts all text content from both Light DOM and any open Shadow DOMs, mimicking block formatting.
+// 💥 [Shadow DOM & Same-Origin IFrame Penetrating Text Scraper]
+// Recursively extracts all text content from Light DOM, open Shadow DOMs, and Same-Origin IFrames.
 function getCompleteDOMText(node = document.body) {
   if (!node) return "";
   
   const tagName = node.tagName ? node.tagName.toUpperCase() : "";
   if (tagName === "STYLE" || tagName === "SCRIPT" || tagName === "NOSCRIPT") {
+    return "";
+  }
+
+  // 💥 [Same-Origin Iframe Scraper]
+  // If the node is an iframe, and we can access its contentDocument, scrape it directly!
+  if (tagName === "IFRAME") {
+    try {
+      if (node.contentDocument && node.contentDocument.body) {
+        return "\n" + getCompleteDOMText(node.contentDocument.body) + "\n";
+      }
+    } catch (e) {
+      // Cross-Origin, will rely on postMessage relay
+    }
     return "";
   }
 
@@ -94,15 +107,32 @@ function getCompleteDOMText(node = document.body) {
   return text;
 }
 
-// 💥 [Shadow DOM Penetrating Selector Query]
-// Recursively queries selector inside both Light DOM and open Shadow DOMs.
+// 💥 [Shadow DOM & Same-Origin IFrame Penetrating Selector Query]
+// Recursively queries selector inside Light DOM, open Shadow DOMs, and Same-Origin IFrames.
 function queryShadow(selector, root = document) {
   try {
     const el = root.querySelector(selector);
     if (el) return el;
     
+    // If root itself has contentDocument (e.g. searching inside an iframe document)
+    if (root.contentDocument) {
+      const res = queryShadow(selector, root.contentDocument);
+      if (res) return res;
+    }
+    
     const all = root.querySelectorAll('*');
     for (let child of all) {
+      // Check if child is same-origin iframe
+      if (child.tagName && child.tagName.toUpperCase() === "IFRAME") {
+        try {
+          if (child.contentDocument) {
+            const res = queryShadow(selector, child.contentDocument);
+            if (res) return res;
+          }
+        } catch (e) {}
+      }
+      
+      // Check if child has shadow root
       if (child.shadowRoot) {
         const res = queryShadow(selector, child.shadowRoot);
         if (res) return res;
@@ -398,14 +428,21 @@ function bindPanelEvents(pageType) {
   }
 }
 
-// 💥 [지구 끝까지 수색하는 Shadow DOM 관통형 iframe 검색기]
-// 일반 쿼리셀렉터가 뚫지 못하는 open Shadow DOM 장벽 안쪽까지 재귀적으로 파고들어 모든 iframe 엘리먼트를 사냥합니다.
+// 💥 [지구 끝까지 수색하는 Shadow DOM 및 Same-Origin iframe 재귀 검색기]
+// 일반 쿼리셀렉터가 뚫지 못하는 open Shadow DOM 장벽 및 Same-Origin iframe 장막 안쪽까지 재귀적으로 파고들어 모든 iframe 엘리먼트를 사냥합니다.
 function findAllIframes(root = document) {
   let list = [];
   try {
-    // 1. 현재 루트에서 모든 직접 노출된 iframe 수집
+    // 1. 현재 루트에서 모든 직접 노출된 iframe 수집 및 동일 출처 이레네 재귀 탐색
     const directIframes = root.querySelectorAll('iframe');
-    directIframes.forEach(iframe => list.push(iframe));
+    directIframes.forEach(iframe => {
+      list.push(iframe);
+      try {
+        if (iframe.contentDocument) {
+          list = list.concat(findAllIframes(iframe.contentDocument));
+        }
+      } catch (e) {}
+    });
     
     // 2. 현재 루트의 모든 요소를 뒤져 Shadow DOM 내부 추적
     const allElements = root.querySelectorAll('*');
