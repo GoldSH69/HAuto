@@ -661,7 +661,7 @@ function scrapeLocalFrameData() {
       if (ageMatch2) age = ageMatch2[2] + "세";
     }
 
-    const birthMatchSpecial = rawText.match(/(\d{4})\s*\(\s/\d{2}세/);
+    const birthMatchSpecial = rawText.match(/((?:19|20)\d{2})\s*\(\s*\d{2}세\)/);
     if (birthMatchSpecial) {
       birth = birthMatchSpecial[1] + "년";
     } else {
