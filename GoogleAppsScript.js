@@ -25,17 +25,17 @@ function doPost(e) {
     
     // 시트가 완전히 비어있는 경우 헤더(타이틀) 생성
     if (sheet.getLastRow() === 0) {
-      sheet.appendRow(["등록일", "이름", "연락처", "이메일", "주요 기술", "경력 정보", "진행상태"]);
+      sheet.appendRow(["등록일", "이름", "연락처", "이메일", "주요 기술", "경력 정보", "진행상태", "상태 변경일", "비고"]);
       
       // 헤더 스타일링 (볼드 및 다크네이비 배경)
-      const headerRange = sheet.getRange("A1:G1");
+      const headerRange = sheet.getRange("A1:I1");
       headerRange.setFontWeight("bold");
       headerRange.setBackground("#1E293B");
       headerRange.setFontColor("#FFFFFF");
       headerRange.setHorizontalAlignment("center");
     }
     
-    // 신규 후보자 데이터 추가 (기본 진행상태: '제안 수락 대기')
+    // 신규 후보자 데이터 추가 (기본 진행상태: '제안 수락 대기', 상태 변경일 및 비고는 빈 칸)
     sheet.appendRow([
       data.date || new Date().toLocaleDateString('ko-KR'),
       data.name,
@@ -43,12 +43,14 @@ function doPost(e) {
       data.email,
       data.skills,
       data.experience,
-      "제안 수락 대기"
+      "제안 수락 대기",
+      "", // 상태 변경일 (상태 변경 시 자동 채움)
+      ""  // 비고 (사용자 자유 입력)
     ]);
     
     // 추가된 행의 정렬 맞추기
     const lastRow = sheet.getLastRow();
-    sheet.getRange(lastRow, 1, 1, 7).setHorizontalAlignment("left");
+    sheet.getRange(lastRow, 1, 1, 9).setHorizontalAlignment("left");
     
     return ContentService.createTextOutput(JSON.stringify({ success: true }))
                          .setMimeType(ContentService.MimeType.JSON);
@@ -59,7 +61,7 @@ function doPost(e) {
 }
 
 // 2. 구글 스프레드시트 상태 값 변경 시 이메일 템플릿 작성 및 발송 트리거
-// (사용자가 시트에서 '진행상태' 열의 값을 바꾸었을 때 자동 이메일 어시스트)
+// (사용자가 시트에서 '진행상태' 열의 값을 바꾸었을 때 자동 이메일 어시스트 및 변경일 자동 채움)
 function onEdit(e) {
   const range = e.range;
   const sheet = range.getSheet();
@@ -72,6 +74,9 @@ function onEdit(e) {
   const statusValue = range.getValue();
   const email = sheet.getRange(editedRow, 4).getValue(); // D열 (이메일)
   const name = sheet.getRange(editedRow, 2).getValue();  // B열 (이름)
+  
+  // ⚡ [자동화] 7번째 열(진행상태)이 바뀌면 즉시 8번째 열(상태 변경일)에 오늘 날짜 자동 입력
+  sheet.getRange(editedRow, 8).setValue(new Date().toLocaleDateString('ko-KR'));
   
   if (!email || !name) return;
   

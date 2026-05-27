@@ -199,6 +199,12 @@ async function saveToNotion(token, databaseId, candidate) {
       },
       "등록일": {
         date: { start: new Date().toISOString().split('T')[0] }
+      },
+      "상태 변경일": {
+        date: null // 최초 등록 시에는 비어있고, 상태 변경 시 채워짐
+      },
+      "비고": {
+        rich_text: [] // 사용자가 직접 노션에서 입력하도록 공란 세팅
       }
     },
     children: [
