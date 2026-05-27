@@ -383,7 +383,7 @@ function scrapeResumeData() {
   }
 
   // 2. 탭 타이틀 기반 이름 복구 (극강의 메타 문자 필터링)
-  if (!name || name.trim() === "" || name.includes('인재풀') || name.includes('검색') || name.includes('후보자')) {
+  if (!name || name.trim() === "" || name.includes('인재풀') || name.includes('검색') || name.includes('후보자') || name.includes('미탐지')) {
     const docTitle = document.title;
     // '인재풀', '검색', '후보자', '상세', '후' 등의 메타단어 제거 강도 조절
     let cleanTitle = docTitle.replace(/(이력서|사람인|잡코리아|JOBKOREA|saramin|포트폴리오|열람|보기|관리|상세|인재풀|인재|검색|후보자|목록|후|내역|다운로드|[-|[\]()|:\s])/gi, '').trim();
@@ -396,6 +396,52 @@ function scrapeResumeData() {
       // 영어 이름 등 유효 문자 8자 이내
       name = cleanTitle.substring(0, 8).trim() || "미탐지_후보자";
     }
+  }
+
+  // 2-B. 💥 [최종 이름 구출 엔진] 본문 텍스트 내 인적사항 패턴 역추적 (셀렉터 & 타이틀이 모두 숨겨진 경우)
+  if (!name || name.trim() === "" || name.includes('미탐지') || name.includes('후보자') || name.length > 5) {
+    // 패턴 A: "성명: 홍길동" 또는 "이름 : 홍길동"
+    const namePattern = /(이름|성명)\s*[:\s]\s*([가-힣]{2,4})/i;
+    const matchA = rawText.match(namePattern);
+    if (matchA && matchA[2]) {
+      name = matchA[2].trim();
+    }
+    
+    // 패턴 B: "홍길동 (남, 32세)" 또는 "홍길동(35세)" 또는 "홍길동 (30)"
+    if (!name || name.trim() === "" || name.includes('미탐지') || name.length > 5) {
+      const agePattern = /([가-힣]{2,4})\s*\(\s*(남|여)?\s*,?\s*\d{2}세?\s*\)/;
+      const matchB = rawText.match(agePattern);
+      if (matchB && matchB[1]) {
+        name = matchB[1].trim();
+      }
+    }
+
+    // 패턴 C: "홍길동 / 1993년생" 또는 "홍길동 95년생"
+    if (!name || name.trim() === "" || name.includes('미탐지') || name.length > 5) {
+      const birthPattern = /([가-힣]{2,4})\s*(\/)?\s*\d{2,4}년생/;
+      const matchC = rawText.match(birthPattern);
+      if (matchC && matchC[1]) {
+        name = matchC[1].trim();
+      }
+    }
+    
+    // 최후의 보완: 화면 내 텍스트 중 "010-" 앞 15자 내외에서 이름 단어 찾아보기
+    if (!name || name.trim() === "" || name.includes('미탐지') || name.length > 5) {
+      const phoneIndex = rawText.indexOf("010");
+      if (phoneIndex !== -1) {
+        const nearText = rawText.substring(Math.max(0, phoneIndex - 30), phoneIndex);
+        const nearKrMatch = nearText.match(/[가-힣]{2,4}/g);
+        if (nearKrMatch && nearKrMatch.length > 0) {
+          // 전화번호 앞부분 근처에 나타난 가장 마지막 한글 단어를 이름으로 유추
+          name = nearKrMatch[nearKrMatch.length - 1];
+        }
+      }
+    }
+  }
+
+  // 최종 복구 보장
+  if (!name || name.trim() === "" || name.length > 10) {
+    name = "미탐지_후보자";
   }
 
   // 3. 연락처 및 이메일 추출 (정규식 기본 탐재)
