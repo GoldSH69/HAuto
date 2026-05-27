@@ -359,6 +359,7 @@ function scrapeCompanyJd() {
 function scrapeResumeData() {
   const url = window.location.href;
   const isSaramin = url.includes('saramin.co.kr');
+  const rawText = document.body.innerText; // 전체 화면 텍스트
   
   let name = '';
   let phone = '';
@@ -366,74 +367,103 @@ function scrapeResumeData() {
   let skills = '';
   let experience = '';
   let coverLetter = '';
-  let rawText = document.body.innerText; // Fallback context
 
-  if (isSaramin) {
-    // Saramin Selector parsing rules (Optimized)
-    const nameEl = document.querySelector('.info_name') || document.querySelector('.name') || document.querySelector('h1');
-    name = nameEl ? nameEl.innerText.replace(/[\n\t]/g, '').trim() : '';
-
-    const phoneEl = document.querySelector('.info_phone') || document.querySelector('[class*="phone"]') || document.querySelector('.telephone');
-    phone = phoneEl ? phoneEl.innerText.trim() : '';
-
-    const emailEl = document.querySelector('.info_email') || document.querySelector('[class*="email"]') || document.querySelector('.mail');
-    email = emailEl ? emailEl.innerText.trim() : '';
-
-    // Skills & experience matching
-    const skillsEl = document.querySelector('.wrap_tag') || document.querySelector('.list_skill');
-    skills = skillsEl ? skillsEl.innerText.trim() : '';
-
-    const expEl = document.querySelector('.career_info') || document.querySelector('.total_career');
-    experience = expEl ? expEl.innerText.trim() : '';
-
-    const clEl = document.querySelector('.self_intro') || document.querySelector('#selfIntro') || document.querySelector('.self_introduction');
-    coverLetter = clEl ? clEl.innerText.trim() : '';
-  } else {
-    // Jobkorea Selector parsing rules (Optimized)
-    const nameEl = document.querySelector('.name') || document.querySelector('.name-area') || document.querySelector('h1');
-    name = nameEl ? nameEl.innerText.trim() : '';
-
-    const phoneEl = document.querySelector('.tel') || document.querySelector('.mobile') || document.querySelector('[class*="tel"]');
-    phone = phoneEl ? phoneEl.innerText.trim() : '';
-
-    const emailEl = document.querySelector('.email') || document.querySelector('.mail') || document.querySelector('[class*="email"]');
-    email = emailEl ? emailEl.innerText.trim() : '';
-
-    const skillsEl = document.querySelector('.skill-tag') || document.querySelector('.list_skill');
-    skills = skillsEl ? skillsEl.innerText.trim() : '';
-
-    const expEl = document.querySelector('.career-term') || document.querySelector('.work-exp');
-    experience = expEl ? expEl.innerText.trim() : '';
-
-    const clEl = document.querySelector('.intro-box') || document.querySelector('.portfolio_intro') || document.querySelector('.introduction');
-    coverLetter = clEl ? clEl.innerText.trim() : '';
+  // 1. 이름 추출 (사람인/잡코리아 인재풀 및 일반 뷰어 통합 셀렉터 목록)
+  const nameSelectors = [
+    '.info_general h1', '.info_general .c_black', '.info_name', '.name', '.name-area',
+    '.user_name', '.user-name', '.profile-name', 'h1', 'h2', '.profile_name',
+    '.info_general_name', '#resumeName'
+  ];
+  for (let s of nameSelectors) {
+    const el = document.querySelector(s);
+    if (el && el.innerText.trim().length > 0 && el.innerText.trim().length <= 15) {
+      name = el.innerText.replace(/[\n\t]/g, '').trim();
+      break;
+    }
   }
 
-  // Backup values from raw regex matching if selectors failed
-  if (!phone) {
-    const phoneMatch = rawText.match(/010[-.\s]?\d{3,4}[-.\s]?\d{4}/);
-    phone = phoneMatch ? phoneMatch[0] : '';
-  }
-  if (!email) {
-    const emailMatch = rawText.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
-    email = emailMatch ? emailMatch[0] : '';
-  }
-
-  // ⚡ [Fallback] 100% 이름 복구 알고리즘 (브라우저 탭 타이틀 & 정규식 스캔)
-  if (!name || name.trim() === "") {
+  // 2. 탭 타이틀 기반 이름 복구 (극강의 메타 문자 필터링)
+  if (!name || name.trim() === "" || name.includes('인재풀') || name.includes('검색') || name.includes('후보자')) {
     const docTitle = document.title;
-    // 불필요한 메타 정보 및 특수문자 제거
-    let cleanTitle = docTitle.replace(/(이력서|사람인|잡코리아|JOBKOREA|saramin|포트폴리오|열람|보기|관리|상세|[-|[\]()|:\s])/gi, '').trim();
+    // '인재풀', '검색', '후보자', '상세', '후' 등의 메타단어 제거 강도 조절
+    let cleanTitle = docTitle.replace(/(이력서|사람인|잡코리아|JOBKOREA|saramin|포트폴리오|열람|보기|관리|상세|인재풀|인재|검색|후보자|목록|후|내역|다운로드|[-|[\]()|:\s])/gi, '').trim();
     
     // 한국어 이름(2~4자) 정규식 매칭 시도
     const krNameMatch = cleanTitle.match(/[가-힣]{2,4}/);
     if (krNameMatch) {
       name = krNameMatch[0];
     } else {
-      // 영문 이름 또는 유효 문자열의 첫 8자 사용
+      // 영어 이름 등 유효 문자 8자 이내
       name = cleanTitle.substring(0, 8).trim() || "미탐지_후보자";
     }
   }
+
+  // 3. 연락처 및 이메일 추출 (정규식 기본 탐재)
+  const phoneMatch = rawText.match(/010[-.\s]?\d{3,4}[-.\s]?\d{4}/);
+  phone = phoneMatch ? phoneMatch[0] : '';
+
+  const emailMatch = rawText.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+  email = emailMatch ? emailMatch[0] : '';
+
+  // 4. 주요 기술 추출 (클래스 매칭 실패 시 텍스트 지능형 문맥 분석)
+  const skillSelectors = ['.wrap_tag', '.list_skill', '.skill-tag', '.skills', '[class*="skill"]', '.tag_skill'];
+  for (let s of skillSelectors) {
+    const el = document.querySelector(s);
+    if (el && el.innerText.trim().length > 2) {
+      skills = el.innerText.trim();
+      break;
+    }
+  }
+  
+  // 💥 [지능형 문맥 스캐너] 스킬
+  if (!skills || skills.length < 3) {
+    const skillKeywords = ["주요 기술", "보유 기술", "핵심 기술", "스킬", "Skill", "보유기술", "전문기술", "전문 분야", "전문분야"];
+    for (let kw of skillKeywords) {
+      const idx = rawText.indexOf(kw);
+      if (idx !== -1) {
+        // 발견한 키워드로부터 250글자 확보 후 개행문자 정제
+        skills = rawText.substring(idx, idx + 250).replace(/[\r\n\t]+/g, ' ').trim();
+        break;
+      }
+    }
+  }
+
+  // 5. 경력 정보 추출 (클래스 매칭 실패 시 텍스트 지능형 문맥 분석)
+  const expSelectors = ['.career_info', '.total_career', '.career-term', '.work-exp', '[class*="career"]', '[class*="experience"]'];
+  for (let s of expSelectors) {
+    const el = document.querySelector(s);
+    if (el && el.innerText.trim().length > 5) {
+      experience = el.innerText.trim();
+      break;
+    }
+  }
+
+  // 💥 [지능형 문맥 스캐너] 경력
+  if (!experience || experience.length < 5) {
+    const expKeywords = ["경력사항", "근무경력", "경력 정보", "주요 경력", "경력 리스트", "경력", "Work Experience", "경력 정보", "주요경력"];
+    for (let kw of expKeywords) {
+      const idx = rawText.indexOf(kw);
+      if (idx !== -1) {
+        // 발견한 경력 키워드로부터 350글자 확보 후 개행문자 정제
+        experience = rawText.substring(idx, idx + 350).replace(/[\r\n\t]+/g, ' ').trim();
+        break;
+      }
+    }
+  }
+
+  // 6. 자소서 추출
+  const clSelectors = ['.self_intro', '#selfIntro', '.self_introduction', '.intro-box', '.portfolio_intro', '.introduction', '[class*="intro"]'];
+  for (let s of clSelectors) {
+    const el = document.querySelector(s);
+    if (el && el.innerText.trim().length > 10) {
+      coverLetter = el.innerText.trim();
+      break;
+    }
+  }
+
+  // Fallback default values
+  if (!skills) skills = "화면 내 기술스택 미표시 (상세내용 참고)";
+  if (!experience) experience = "화면 내 경력정보 미표시 (상세내용 참고)";
 
   return { name, phone, email, skills, experience, coverLetter, rawText };
 }
