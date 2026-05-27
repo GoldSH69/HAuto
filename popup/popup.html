@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <title>HAuto 채용 자동화 비서 설정</title>
+  <link rel="stylesheet" href="popup.css">
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&family=Noto+Sans+KR:wght@300;400;500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+  <div class="container">
+    <!-- Header -->
+    <header class="app-header">
+      <div class="logo-area">
+        <span class="logo-icon">🚀</span>
+        <h1 class="logo-title">HAuto <span>Recruiting Assistant</span></h1>
+      </div>
+      <div class="status-indicator">
+        <span class="pulse-dot"></span>
+        <span class="status-text">Cloud Sync Ready</span>
+      </div>
+    </header>
+
+    <!-- Main Tabs -->
+    <div class="tabs">
+      <button class="tab-btn active" data-tab="config">연동 설정</button>
+      <button class="tab-btn" data-tab="ai-options">AI & 프롬프트</button>
+    </div>
+
+    <!-- Tab 1: Config -->
+    <div class="tab-content active" id="tab-config">
+      <section class="section">
+        <h2 class="section-title">🔑 API 자격 증명 설정</h2>
+        
+        <div class="form-group">
+          <label for="gemini-key">Gemini API Key</label>
+          <div class="input-with-btn">
+            <input type="password" id="gemini-key" placeholder="AI 분석용 Gemini API 키 입력">
+            <button class="toggle-pwd-btn">👁️</button>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="sheet-url">Google Sheets URL</label>
+          <input type="text" id="sheet-url" placeholder="실시간 기록용 구글 스프레드시트 주소">
+        </div>
+
+        <div class="form-group">
+          <label for="notion-token">Notion API Integration Token</label>
+          <div class="input-with-btn">
+            <input type="password" id="notion-token" placeholder="상세 이력서 보관용 노션 연동 토큰">
+            <button class="toggle-pwd-btn">👁️</button>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="notion-db-id">Notion Database ID</label>
+          <input type="text" id="notion-db-id" placeholder="Notion Database ID">
+        </div>
+      </section>
+
+      <section class="section">
+        <h2 class="section-title">🏢 사용자 환경</h2>
+        <div class="form-group row-align">
+          <label for="auto-open-mail">메일 작성 시 사내 메일 자동 오픈</label>
+          <label class="switch-container">
+            <input type="checkbox" id="auto-open-mail" checked>
+            <span class="switch-slider"></span>
+          </label>
+        </div>
+      </section>
+    </div>
+
+    <!-- Tab 2: AI & Prompt Options -->
+    <div class="tab-content" id="tab-ai-options">
+      <section class="section">
+        <h2 class="section-title">🤖 AI 기능별 개별 설정 (옵션)</h2>
+        <p class="section-desc">필요한 AI 요약 단계만 활성화하여 API 비용을 절감하세요.</p>
+
+        <!-- AI Item 1 -->
+        <div class="ai-control-card">
+          <div class="card-left">
+            <h3 class="card-title">1단계: JD 기반 플랫폼 검색어 추출</h3>
+            <span class="card-badge green">Gemini API</span>
+          </div>
+          <div class="card-right">
+            <button class="btn-prompt-view" data-feature="step1" title="프롬프트 보기/수정">🔍</button>
+            <label class="switch-container">
+              <input type="checkbox" id="ai-step1">
+              <span class="switch-slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <!-- AI Item 2 -->
+        <div class="ai-control-card">
+          <div class="card-left">
+            <h3 class="card-title">2단계: JD - 후보자 매칭 적합도 분석</h3>
+            <span class="card-badge purple">Core AI</span>
+          </div>
+          <div class="card-right">
+            <button class="btn-prompt-view" data-feature="step2" title="프롬프트 보기/수정">🔍</button>
+            <label class="switch-container">
+              <input type="checkbox" id="ai-step2" checked>
+              <span class="switch-slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <!-- AI Item 3 -->
+        <div class="ai-control-card">
+          <div class="card-left">
+            <h3 class="card-title">3단계: 개인화 제안 메시지 초안 작성</h3>
+            <span class="card-badge blue">Creative AI</span>
+          </div>
+          <div class="card-right">
+            <button class="btn-prompt-view" data-feature="step3" title="프롬프트 보기/수정">🔍</button>
+            <label class="switch-container">
+              <input type="checkbox" id="ai-step3">
+              <span class="switch-slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <!-- AI Item 4 -->
+        <div class="ai-control-card">
+          <div class="card-left">
+            <h3 class="card-title">6단계: 자유 이력서 표준 템플릿 변환</h3>
+            <span class="card-badge orange">Parser AI</span>
+          </div>
+          <div class="card-right">
+            <button class="btn-prompt-view" data-feature="step6" title="프롬프트 보기/수정">🔍</button>
+            <label class="switch-container">
+              <input type="checkbox" id="ai-step6">
+              <span class="switch-slider"></span>
+            </label>
+          </div>
+        </div>
+
+        <!-- AI Item 5 -->
+        <div class="ai-control-card">
+          <div class="card-left">
+            <h3 class="card-title">추가요건: 핵심역량 & 자소서 요약 추출</h3>
+            <span class="card-badge magenta">On-Demand</span>
+          </div>
+          <div class="card-right">
+            <button class="btn-prompt-view" data-feature="competency" title="프롬프트 보기/수정">🔍</button>
+            <label class="switch-container">
+              <input type="checkbox" id="ai-competency" checked>
+              <span class="switch-slider"></span>
+            </label>
+          </div>
+        </div>
+      </section>
+    </div>
+
+    <!-- Footer Buttons -->
+    <footer class="app-footer">
+      <span class="version-label">v1.0.0</span>
+      <button id="save-btn" class="primary-btn">설정 저장</button>
+    </footer>
+  </div>
+
+  <!-- Prompt Editor Modal -->
+  <div class="modal" id="prompt-modal">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h3 id="modal-title" class="modal-title-text">지시어(프롬프트) 관리</h3>
+        <button class="close-modal-btn">&times;</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-desc">이 단계에 사용될 Gemini API 프롬프트 양식입니다. <code>{{JD}}</code>, <code>{{이력서}}</code>, <code>{{자소서}}</code> 변수 자리는 시스템이 실시간 텍스트로 치환합니다.</p>
+        <textarea id="prompt-textarea" rows="12"></textarea>
+      </div>
+      <div class="modal-footer">
+        <button id="modal-reset-btn" class="danger-btn">기본값 초기화</button>
+        <div class="right-buttons">
+          <button id="modal-copy-btn" class="secondary-btn">최종본 복사</button>
+          <button id="modal-save-btn" class="primary-btn">저장</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
