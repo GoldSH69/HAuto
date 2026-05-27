@@ -419,6 +419,22 @@ function scrapeResumeData() {
     email = emailMatch ? emailMatch[0] : '';
   }
 
+  // ⚡ [Fallback] 100% 이름 복구 알고리즘 (브라우저 탭 타이틀 & 정규식 스캔)
+  if (!name || name.trim() === "") {
+    const docTitle = document.title;
+    // 불필요한 메타 정보 및 특수문자 제거
+    let cleanTitle = docTitle.replace(/(이력서|사람인|잡코리아|JOBKOREA|saramin|포트폴리오|열람|보기|관리|상세|[-|[\]()|:\s])/gi, '').trim();
+    
+    // 한국어 이름(2~4자) 정규식 매칭 시도
+    const krNameMatch = cleanTitle.match(/[가-힣]{2,4}/);
+    if (krNameMatch) {
+      name = krNameMatch[0];
+    } else {
+      // 영문 이름 또는 유효 문자열의 첫 8자 사용
+      name = cleanTitle.substring(0, 8).trim() || "미탐지_후보자";
+    }
+  }
+
   return { name, phone, email, skills, experience, coverLetter, rawText };
 }
 
