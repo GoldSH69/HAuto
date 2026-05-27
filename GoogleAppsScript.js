@@ -23,24 +23,26 @@ function doPost(e) {
     const sheet = SpreadsheetApp.getActiveSpreadsheet().getActiveSheet();
     const data = JSON.parse(e.postData.contents);
     
-    // 시트가 완전히 비어있는 경우 헤더(타이틀) 생성
+    // 시트가 완전히 비어있는 경우 헤더(타이틀) 생성 (생년월일 및 나이 추가하여 총 11개 열)
     if (sheet.getLastRow() === 0) {
-      sheet.appendRow(["등록일", "이름", "연락처", "이메일", "주요 기술", "경력 정보", "진행상태", "상태 변경일", "비고"]);
+      sheet.appendRow(["등록일", "이름", "연락처", "이메일", "생년월일", "나이", "주요 기술", "경력 정보", "진행상태", "상태 변경일", "비고"]);
       
       // 헤더 스타일링 (볼드 및 다크네이비 배경)
-      const headerRange = sheet.getRange("A1:I1");
+      const headerRange = sheet.getRange("A1:K1");
       headerRange.setFontWeight("bold");
       headerRange.setBackground("#1E293B");
       headerRange.setFontColor("#FFFFFF");
       headerRange.setHorizontalAlignment("center");
     }
     
-    // 신규 후보자 데이터 추가 (기본 진행상태: '제안 수락 대기', 상태 변경일 및 비고는 빈 칸)
+    // 신규 후보자 데이터 추가 (기본 진행상태: '제안 수락 대기')
     sheet.appendRow([
       data.date || new Date().toLocaleDateString('ko-KR'),
       data.name,
       data.phone,
       data.email,
+      data.birth || "", // 생년월일
+      data.age || "",   // 나이
       data.skills,
       data.experience,
       "제안 수락 대기",
@@ -50,7 +52,7 @@ function doPost(e) {
     
     // 추가된 행의 정렬 맞추기
     const lastRow = sheet.getLastRow();
-    sheet.getRange(lastRow, 1, 1, 9).setHorizontalAlignment("left");
+    sheet.getRange(lastRow, 1, 1, 11).setHorizontalAlignment("left");
     
     return ContentService.createTextOutput(JSON.stringify({ success: true }))
                          .setMimeType(ContentService.MimeType.JSON);
@@ -61,22 +63,22 @@ function doPost(e) {
 }
 
 // 2. 구글 스프레드시트 상태 값 변경 시 이메일 템플릿 작성 및 발송 트리거
-// (사용자가 시트에서 '진행상태' 열의 값을 바꾸었을 때 자동 이메일 어시스트 및 변경일 자동 채움)
+// (생년월일, 나이 추가로 인해 '진행상태'는 9번째 열로 이동하였습니다.)
 function onEdit(e) {
   const range = e.range;
   const sheet = range.getSheet();
   const editedColumn = range.getColumn();
   const editedRow = range.getRow();
   
-  // 첫 번째 행(헤더)이거나, 7번째 열(진행상태)이 아닌 경우 스킵
-  if (editedRow === 1 || editedColumn !== 7) return;
+  // 첫 번째 행(헤더)이거나, 9번째 열(진행상태)이 아닌 경우 스킵
+  if (editedRow === 1 || editedColumn !== 9) return;
   
   const statusValue = range.getValue();
   const email = sheet.getRange(editedRow, 4).getValue(); // D열 (이메일)
   const name = sheet.getRange(editedRow, 2).getValue();  // B열 (이름)
   
-  // ⚡ [자동화] 7번째 열(진행상태)이 바뀌면 즉시 8번째 열(상태 변경일)에 오늘 날짜 자동 입력
-  sheet.getRange(editedRow, 8).setValue(new Date().toLocaleDateString('ko-KR'));
+  // ⚡ [자동화] 9번째 열(진행상태)이 바뀌면 즉시 10번째 열(상태 변경일)에 오늘 날짜 자동 입력
+  sheet.getRange(editedRow, 10).setValue(new Date().toLocaleDateString('ko-KR'));
   
   if (!email || !name) return;
   

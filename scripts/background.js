@@ -205,6 +205,16 @@ async function saveToNotion(token, databaseId, candidate) {
       },
       "비고": {
         rich_text: [] // 사용자가 직접 노션에서 입력하도록 공란 세팅
+      },
+      "생년월일": {
+        rich_text: [
+          { text: { content: candidate.birth || "" } }
+        ]
+      },
+      "나이": {
+        rich_text: [
+          { text: { content: candidate.age || "" } }
+        ]
       }
     },
     children: [

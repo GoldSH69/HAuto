@@ -358,7 +358,6 @@ function scrapeCompanyJd() {
 
 function scrapeResumeData() {
   const url = window.location.href;
-  const isSaramin = url.includes('saramin.co.kr');
   const rawText = document.body.innerText; // 전체 화면 텍스트
   
   let name = '';
@@ -383,44 +382,46 @@ function scrapeResumeData() {
   }
 
   // 2. 탭 타이틀 기반 이름 복구 (극강의 메타 문자 필터링)
-  if (!name || name.trim() === "" || name.includes('인재풀') || name.includes('검색') || name.includes('후보자') || name.includes('미탐지')) {
+  if (!name || name.trim() === "" || name.includes('인재풀') || name.includes('검색') || name.includes('후보자') || name.includes('미탐지') || name.includes('합격') || name.includes('결과')) {
     const docTitle = document.title;
-    // '인재풀', '검색', '후보자', '상세', '후' 등의 메타단어 제거 강도 조절
-    let cleanTitle = docTitle.replace(/(이력서|사람인|잡코리아|JOBKOREA|saramin|포트폴리오|열람|보기|관리|상세|인재풀|인재|검색|후보자|목록|후|내역|다운로드|[-|[\]()|:\s])/gi, '').trim();
+    // 채용 상태 단어(합격/불합격/서류/면접 등) 필터 추가 강화
+    let cleanTitle = docTitle.replace(/(이력서|사람인|잡코리아|JOBKOREA|saramin|포트폴리오|열람|보기|관리|상세|인재풀|인재|검색|후보자|목록|후|내역|다운로드|불합격|합격|서류|면접|최종|진행|상태|결과|통보|[-|[\]()|:\s])/gi, '').trim();
     
     // 한국어 이름(2~4자) 정규식 매칭 시도
     const krNameMatch = cleanTitle.match(/[가-힣]{2,4}/);
     if (krNameMatch) {
       name = krNameMatch[0];
     } else {
-      // 영어 이름 등 유효 문자 8자 이내
       name = cleanTitle.substring(0, 8).trim() || "미탐지_후보자";
     }
   }
 
-  // 2-B. 💥 [최종 이름 구출 엔진] 본문 텍스트 내 인적사항 패턴 역추적 (셀렉터 & 타이틀이 모두 숨겨진 경우)
-  if (!name || name.trim() === "" || name.includes('미탐지') || name.includes('후보자') || name.length > 5) {
+  // 2-B. 💥 [최종 이름 구출 엔진] 본문 텍스트 내 인적사항 패턴 역추적 (블랙리스트 보완)
+  const nameBlacklist = ["합격", "불합", "탈락", "서류", "면접", "진행", "결과", "상태", "이름", "성명", "인재", "포탈", "회원", "관리", "인재풀"];
+  const isInvalidName = (n) => !n || n.trim() === "" || n.includes('미탐지') || n.includes('후보자') || n.length > 5 || nameBlacklist.some(b => n.includes(b));
+
+  if (isInvalidName(name)) {
     // 패턴 A: "성명: 홍길동" 또는 "이름 : 홍길동"
     const namePattern = /(이름|성명)\s*[:\s]\s*([가-힣]{2,4})/i;
     const matchA = rawText.match(namePattern);
-    if (matchA && matchA[2]) {
+    if (matchA && matchA[2] && !isInvalidName(matchA[2])) {
       name = matchA[2].trim();
     }
     
     // 패턴 B: "홍길동 (남, 32세)" 또는 "홍길동(35세)" 또는 "홍길동 (30)"
-    if (!name || name.trim() === "" || name.includes('미탐지') || name.length > 5) {
+    if (isInvalidName(name)) {
       const agePattern = /([가-힣]{2,4})\s*\(\s*(남|여)?\s*,?\s*\d{2}세?\s*\)/;
       const matchB = rawText.match(agePattern);
-      if (matchB && matchB[1]) {
+      if (matchB && matchB[1] && !isInvalidName(matchB[1])) {
         name = matchB[1].trim();
       }
     }
 
     // 패턴 C: "홍길동 / 1993년생" 또는 "홍길동 95년생"
-    if (!name || name.trim() === "" || name.includes('미탐지') || name.length > 5) {
+    if (isInvalidName(name)) {
       const birthPattern = /([가-힣]{2,4})\s*(\/)?\s*\d{2,4}년생/;
       const matchC = rawText.match(birthPattern);
-      if (matchC && matchC[1]) {
+      if (matchC && matchC[1] && !isInvalidName(matchC[1])) {
         name = matchC[1].trim();
       }
     }
@@ -511,7 +512,7 @@ function scrapeResumeData() {
   if (!skills) skills = "화면 내 기술스택 미표시 (상세내용 참고)";
   if (!experience) experience = "화면 내 경력정보 미표시 (상세내용 참고)";
 
-  return { name, phone, email, skills, experience, coverLetter, rawText };
+  return { name, phone, email, birth, age, skills, experience, coverLetter, rawText };
 }
 
 // 6. Generic Premium Result Modal Helper inside target page
@@ -568,7 +569,7 @@ function handleExcelDownload() {
   }
 
   // Create CSV Content with BOM (prevents Korean character corruption in MS Excel)
-  const headers = ["등록일", "이름", "연락처", "이메일", "주요 기술", "경력 정보", "진행상태", "상태 변경일", "비고"];
+  const headers = ["등록일", "이름", "연락처", "이메일", "생년월일", "나이", "주요 기술", "경력 정보", "진행상태", "상태 변경일", "비고"];
   const dateStr = new Date().toLocaleDateString('ko-KR');
   
   // Clean text from commas and newlines for CSV format safety
@@ -583,6 +584,8 @@ function handleExcelDownload() {
     clean(resumeData.name),
     clean(resumeData.phone),
     clean(resumeData.email),
+    clean(resumeData.birth), // 생년월일
+    clean(resumeData.age),   // 나이
     clean(resumeData.skills),
     clean(resumeData.experience),
     clean("제안 수락 대기"),
