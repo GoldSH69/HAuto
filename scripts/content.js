@@ -62,6 +62,56 @@ function isContextValid() {
   }
 }
 
+// 💥 [Shadow DOM Penetrating Text Scraper]
+// Recursively extracts all text content from both Light DOM and any open Shadow DOMs, mimicking block formatting.
+function getCompleteDOMText(node = document.body) {
+  if (!node) return "";
+  
+  const tagName = node.tagName ? node.tagName.toUpperCase() : "";
+  if (tagName === "STYLE" || tagName === "SCRIPT" || tagName === "NOSCRIPT") {
+    return "";
+  }
+
+  if (node.nodeType === Node.TEXT_NODE) {
+    return node.nodeValue;
+  }
+
+  let text = "";
+  if (node.childNodes && node.childNodes.length > 0) {
+    node.childNodes.forEach((child) => {
+      text += getCompleteDOMText(child);
+    });
+  }
+
+  if (node.shadowRoot) {
+    text += "\n" + getCompleteDOMText(node.shadowRoot) + "\n";
+  }
+
+  if (tagName === "DIV" || tagName === "P" || tagName === "LI" || tagName === "TR" || tagName === "BR") {
+    text += "\n";
+  }
+
+  return text;
+}
+
+// 💥 [Shadow DOM Penetrating Selector Query]
+// Recursively queries selector inside both Light DOM and open Shadow DOMs.
+function queryShadow(selector, root = document) {
+  try {
+    const el = root.querySelector(selector);
+    if (el) return el;
+    
+    const all = root.querySelectorAll('*');
+    for (let child of all) {
+      if (child.shadowRoot) {
+        const res = queryShadow(selector, child.shadowRoot);
+        if (res) return res;
+      }
+    }
+  } catch (e) {}
+  return null;
+}
+
 // 크롬 표준 런타임 메시지 수신기 (동일 프레임 통신용)
 try {
   if (chrome.runtime && chrome.runtime.onMessage) {
@@ -601,7 +651,7 @@ function scrapeCompanyJd() {
 
 // 💥 [Secure Local Frame Scraper] Restricts crawling strictly to its own frame DOM. Bypasses CORS.
 function scrapeLocalFrameData() {
-  const rawText = document.body ? document.body.innerText : '';
+  const rawText = getCompleteDOMText(document.body);
   const title = document.title;
   
   let name = '';
@@ -613,19 +663,22 @@ function scrapeLocalFrameData() {
   let experience = '';
   let coverLetter = '';
 
-  // A. Name Parsing: find selectors in its own DOM
+  // A. Name Parsing: find selectors in its own DOM (including Shadow DOM)
   const nameSelectors = [
     '.info_general h1', '.info_general .c_black', '.info_name', '.name', '.name-area',
     '.user_name', '.user-name', '.profile-name', 'h1', 'h2', 'h3', '.profile_name',
     '.info_general_name', '#resumeName', '[class*="Name"]', '[class*="name"]', '[class*="profile"]'
   ];
   for (let s of nameSelectors) {
-    const el = document.querySelector(s);
-    if (el && el.innerText.trim().length > 0 && el.innerText.trim().length <= 10) {
-      const cleanName = el.innerText.replace(/[\n\t\s]/g, '').trim();
-      if (cleanName.length >= 2 && cleanName.length <= 4) {
-        name = cleanName;
-        break;
+    const el = queryShadow(s);
+    if (el) {
+      const elText = (el.innerText || el.textContent || "").trim();
+      if (elText.length > 0 && elText.length <= 10) {
+        const cleanName = elText.replace(/[\n\t\s]/g, '').trim();
+        if (cleanName.length >= 2 && cleanName.length <= 4) {
+          name = cleanName;
+          break;
+        }
       }
     }
   }
@@ -695,13 +748,16 @@ function scrapeLocalFrameData() {
     }
   }
 
-  // D. Skills extraction
+  // D. Skills extraction (including Shadow DOM)
   const skillSelectors = ['.wrap_tag', '.list_skill', '.skill-tag', '.skills', '[class*="skill"]', '.tag_skill'];
   for (let s of skillSelectors) {
-    const el = document.querySelector(s);
-    if (el && el.innerText.trim().length > 2) {
-      skills = el.innerText.trim();
-      break;
+    const el = queryShadow(s);
+    if (el) {
+      const elText = (el.innerText || el.textContent || "").trim();
+      if (elText.length > 2) {
+        skills = elText;
+        break;
+      }
     }
   }
   
@@ -716,13 +772,16 @@ function scrapeLocalFrameData() {
     }
   }
 
-  // E. Experience info
+  // E. Experience info (including Shadow DOM)
   const expSelectors = ['.career_info', '.total_career', '.career-term', '.work-exp', '[class*="career"]', '[class*="experience"]'];
   for (let s of expSelectors) {
-    const el = document.querySelector(s);
-    if (el && el.innerText.trim().length > 5) {
-      experience = el.innerText.trim();
-      break;
+    const el = queryShadow(s);
+    if (el) {
+      const elText = (el.innerText || el.textContent || "").trim();
+      if (elText.length > 5) {
+        experience = elText;
+        break;
+      }
     }
   }
 
@@ -737,13 +796,16 @@ function scrapeLocalFrameData() {
     }
   }
 
-  // F. Cover letter (self-intro)
+  // F. Cover letter (self-intro) (including Shadow DOM)
   const clSelectors = ['.self_intro', '#selfIntro', '.self_introduction', '.intro-box', '.portfolio_intro', '.introduction', '[class*="intro"]'];
   for (let s of clSelectors) {
-    const el = document.querySelector(s);
-    if (el && el.innerText.trim().length > 10) {
-      coverLetter = el.innerText.trim();
-      break;
+    const el = queryShadow(s);
+    if (el) {
+      const elText = (el.innerText || el.textContent || "").trim();
+      if (elText.length > 10) {
+        coverLetter = elText;
+        break;
+      }
     }
   }
 
