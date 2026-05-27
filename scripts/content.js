@@ -397,20 +397,20 @@ function scrapeResumeData() {
   }
 
   // 2-B. 💥 [최종 이름 구출 엔진] 본문 텍스트 내 인적사항 패턴 역추적 (블랙리스트 보완)
-  const nameBlacklist = ["합격", "불합", "탈락", "서류", "면접", "진행", "결과", "상태", "이름", "성명", "인재", "포탈", "회원", "관리", "인재풀"];
+  const nameBlacklist = ["합격", "불합", "탈락", "서류", "면접", "진행", "결과", "상태", "이름", "성명", "인재", "포탈", "회원", "관리", "인재풀", "대기", "나이", "성별", "지원", "전형", "채용", "이력", "포지션", "구직", "구인", "이메일", "연락처", "전화"];
   const isInvalidName = (n) => !n || n.trim() === "" || n.includes('미탐지') || n.includes('후보자') || n.length > 5 || nameBlacklist.some(b => n.includes(b));
 
   if (isInvalidName(name)) {
     // 패턴 A: "성명: 홍길동" 또는 "이름 : 홍길동"
-    const namePattern = /(이름|성명)\s*[:\s]\s*([가-힣]{2,4})/i;
+    const namePattern = /(이름|성명)\s*[:\s]\s*([가-힣*]{2,4})/i;
     const matchA = rawText.match(namePattern);
     if (matchA && matchA[2] && !isInvalidName(matchA[2])) {
       name = matchA[2].trim();
     }
     
-    // 패턴 B: "홍길동 (남, 32세)" 또는 "홍길동(35세)" 또는 "홍길동 (30)"
+    // 패턴 B: "홍길동 (남, 32세)" 또는 "홍길동(35세)" 또는 "홍길동 (30)" (마스킹 * 지원)
     if (isInvalidName(name)) {
-      const agePattern = /([가-힣]{2,4})\s*\(\s*(남|여)?\s*,?\s*\d{2}세?\s*\)/;
+      const agePattern = /([가-힣*]{2,4})\s*\(\s*(남|여)?\s*,?\s*\d{2}세?\s*\)/;
       const matchB = rawText.match(agePattern);
       if (matchB && matchB[1] && !isInvalidName(matchB[1])) {
         name = matchB[1].trim();
@@ -538,6 +538,11 @@ function scrapeResumeData() {
   // Fallback default values
   if (!skills) skills = "화면 내 기술스택 미표시 (상세내용 참고)";
   if (!experience) experience = "화면 내 경력정보 미표시 (상세내용 참고)";
+
+  // 💥 [최종 이중 잠금 필터] 이름에 불합격 등 블랙리스트 메타 단어가 섞여있다면 최종 차단
+  if (isInvalidName(name)) {
+    name = "미탐지_후보자";
+  }
 
   return { name, phone, email, birth, age, skills, experience, coverLetter, rawText };
 }
