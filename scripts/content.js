@@ -3,19 +3,33 @@
 
 const HAUTO_UI_ID = 'hauto-assistant-panel';
 
-// 1. Core initialization on page load
-initHAutoAssistant();
-// Start background monitoring updates
-startMonitorUpdating();
+// 💥 [Domain Guard]
+// Only start crawler and active monitors on portal domains or local debug setups to save memory and eliminate errors on arbitrary sites (like Naver, Daum, etc.)
+const currentUrl = window.location.href;
+const isTargetDomain = currentUrl.includes('saramin.co.kr') || 
+                       currentUrl.includes('jobkorea.co.kr') || 
+                       currentUrl.includes('localhost') || 
+                       currentUrl.includes('127.0.0.1') ||
+                       currentUrl.includes('hiring') || 
+                       currentUrl.includes('applicant');
+
+if (isTargetDomain) {
+  // Core initialization on target pages only
+  initHAutoAssistant();
+  // Start background monitoring updates on target pages only
+  startMonitorUpdating();
+}
 
 // 💥 [ 우주급 프레임 관통 릴레이 postMessage 수신기 ]
 // CORS(동종기원정책) 보안 장벽을 우회하여, 2중 및 N중 중첩 iframe까지도 신호를 릴레이 전파하여 모든 프레임의 데이터를 백그라운드로 전송합니다.
 window.addEventListener('message', (event) => {
+  if (!isTargetDomain) return; // Only process on recruiting targets
+  
   if (event.data && event.data.action === 'REQUEST_FRAME_REPORT_VIA_POSTMESSAGE') {
     try {
       // 1단계: 자신의 로컬 DOM에서 이력서 정보를 긁어 백그라운드로 즉시 릴레이 전송
       const localData = scrapeLocalFrameData();
-      chrome.runtime.sendMessage({
+      safeSendMessage({
         action: 'SUBMIT_FRAME_REPORT',
         data: localData
       });
@@ -38,22 +52,50 @@ window.addEventListener('message', (event) => {
 });
 
 // 크롬 표준 런타임 메시지 수신기 (동일 프레임 통신용)
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.action === 'REQUEST_FRAME_REPORT') {
-    try {
-      const localData = scrapeLocalFrameData();
-      chrome.runtime.sendMessage({
-        action: 'SUBMIT_FRAME_REPORT',
-        data: localData
-      });
-      sendResponse({ success: true });
-    } catch (e) {
-      console.log('HAuto 런타임 보고 오류:', e.message);
-      sendResponse({ success: false, error: e.message });
-    }
+try {
+  if (chrome.runtime && chrome.runtime.onMessage) {
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+      if (!isTargetDomain) return;
+      
+      if (message.action === 'REQUEST_FRAME_REPORT') {
+        try {
+          const localData = scrapeLocalFrameData();
+          safeSendMessage({
+            action: 'SUBMIT_FRAME_REPORT',
+            data: localData
+          });
+          sendResponse({ success: true });
+        } catch (e) {
+          console.log('HAuto 런타임 보고 오류:', e.message);
+          sendResponse({ success: false, error: e.message });
+        }
+      }
+      return true;
+    });
   }
-  return true;
-});
+} catch (err) {
+  console.log('HAuto 런타임 메시지 리스너 초기화 스킵 (컨텍스트 만료):', err.message);
+}
+
+// 💥 [Safe Message Sender Proxy] 
+// Prevents "Extension context invalidated" crashes during extension updates by evaluating runtime status actively before fetch
+function safeSendMessage(message, callback) {
+  try {
+    if (!chrome.runtime || !chrome.runtime.id) {
+      // Safe skip if extension was reloaded and page has not refreshed yet
+      return false;
+    }
+    chrome.runtime.sendMessage(message, (response) => {
+      // Catch chrome.runtime.lastError to suppress unhandled promise rejections
+      const err = chrome.runtime.lastError;
+      if (callback && !err) callback(response);
+    });
+    return true;
+  } catch (e) {
+    // Graceful error digestion
+    return false;
+  }
+}
 
 function initHAutoAssistant() {
   // 💥 [부모 프레임 가드] 오직 최상단 창(top frame)에만 플로팅 비서 패널을 띄움
@@ -78,7 +120,6 @@ function initHAutoAssistant() {
   } else if (currentUrl.includes('jobkorea.co.kr')) {
     pageType = 'jobkorea';
   } else {
-    // Assume custom company system if not portal sites
     pageType = 'company';
   }
 
@@ -287,7 +328,7 @@ function requestMergedResumeData(callback) {
   // A. Direct report from top-level parent frame itself
   try {
     const parentData = scrapeLocalFrameData();
-    chrome.runtime.sendMessage({
+    safeSendMessage({
       action: 'SUBMIT_FRAME_REPORT',
       data: parentData
     });
@@ -309,7 +350,7 @@ function requestMergedResumeData(callback) {
   });
 
   // C. Query background script for consolidated result (Background holds 350ms timeout to gather)
-  chrome.runtime.sendMessage({ action: 'GET_MERGED_RESUME_DATA' }, (response) => {
+  safeSendMessage({ action: 'GET_MERGED_RESUME_DATA' }, (response) => {
     if (response && response.success && response.data) {
       const resumeData = response.data;
       
@@ -335,7 +376,7 @@ function handleExtractJd() {
     return;
   }
 
-  chrome.runtime.sendMessage({ action: 'EXTRACT_JD_KEYWORDS', text: jdText }, (response) => {
+  safeSendMessage({ action: 'EXTRACT_JD_KEYWORDS', text: jdText }, (response) => {
     if (response && response.success) {
       showResultModal('AI 직무 검색어 추출 결과', response.data);
     } else {
@@ -365,7 +406,7 @@ function handleAiMatch() {
     }
 
     requestMergedResumeData((resumeData) => {
-      chrome.runtime.sendMessage({
+      safeSendMessage({
         action: 'RUN_AI_MATCHING',
         jd: res.activeJd,
         resume: resumeData.rawText
@@ -389,7 +430,7 @@ function handleOfferMsg() {
     }
 
     requestMergedResumeData((resumeData) => {
-      chrome.runtime.sendMessage({
+      safeSendMessage({
         action: 'GENERATE_OFFER_MSG',
         jd: res.activeJd,
         resume: resumeData.rawText
@@ -418,7 +459,7 @@ function handleDbRegister() {
     btn.textContent = '⚡ 처리 중...';
     btn.disabled = true;
 
-    chrome.runtime.sendMessage({
+    safeSendMessage({
       action: 'REGISTER_CANDIDATE',
       data: {
         name: resumeData.name,
@@ -452,7 +493,7 @@ function handleCompetencyExtract() {
     }
 
     requestMergedResumeData((resumeData) => {
-      chrome.runtime.sendMessage({
+      safeSendMessage({
         action: 'EXTRACT_COMPETENCY',
         jd: res.activeJd,
         resume: resumeData.rawText,
@@ -737,9 +778,20 @@ function handleExcelDownload() {
 }
 
 // 9. Premium Real-Time Monitor Panel Update Loop
+let monitorIntervalId = null;
+
 function startMonitorUpdating() {
+  if (monitorIntervalId) clearInterval(monitorIntervalId);
+  
   // Update loop: every 3.0s to dynamically adjust to portal page content
-  setInterval(() => {
+  monitorIntervalId = setInterval(() => {
+    // 💥 [Self-Destruct Pin on Invalid Context]
+    // If extension is updated/reloaded and tab is not refreshed, cleanly stop setInterval to prevent Uncaught Error crashes.
+    if (!chrome.runtime || !chrome.runtime.id) {
+      clearInterval(monitorIntervalId);
+      return;
+    }
+
     // A. Broadcast sub-frame postMessages dynamically to gather DOM text in real time (using recursive Shadow DOM selector)
     const iframes = findAllIframes(document);
     iframes.forEach((iframe) => {
@@ -751,7 +803,7 @@ function startMonitorUpdating() {
     });
 
     // B. Fetch merged data from background worker to update visual monitor indicator
-    chrome.runtime.sendMessage({ action: 'GET_MERGED_RESUME_DATA' }, (response) => {
+    safeSendMessage({ action: 'GET_MERGED_RESUME_DATA' }, (response) => {
       if (response && response.success && response.data) {
         const resumeData = response.data;
         const monitorEl = document.querySelector('.hauto-monitor');
@@ -774,7 +826,7 @@ function showDebugModal(resumeData) {
 
   // Gather frame diagnostics to include in debug info
   const frames = findAllIframes(document);
-  let debugMeta = `[HAuto 프레임 진단 로그]\n- 탐지된 총 iframe 개수: ${frames.length}개\n`;
+  let debugMeta = `[HAuto 프레임 진단 로그]\n- 탭 탐지 여부: ${isTargetDomain ? '참' : '거짓'}\n- 탐지된 총 iframe 개수: ${frames.length}개\n`;
   frames.forEach((f, idx) => {
     debugMeta += `  [iframe #${idx}] src: "${f.getAttribute('src') || 'src 없음'}", id: "${f.id || 'id 없음'}", class: "${f.className || 'class 없음'}"\n`;
   });
