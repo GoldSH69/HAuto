@@ -22,7 +22,7 @@ chrome.tabs.onRemoved.addListener((tabId) => {
   delete tabFramesData[tabId];
 });
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
-  if (changeInfo.status === 'loading') {
+  if (changeInfo.status === 'loading' || changeInfo.url) {
     delete tabFramesData[tabId];
   }
 });
@@ -40,32 +40,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.action === 'RESET_TAB_DATA') {
+    const tabId = sender.tab?.id;
+    if (tabId !== undefined) {
+      tabFramesData[tabId] = {};
+    }
+    sendResponse({ success: true });
+    return true;
+  }
+
   if (message.action === 'GET_MERGED_RESUME_DATA') {
     const tabId = sender.tab?.id;
     if (tabId !== undefined) {
-      // 1. Reset collection bucket for this tab to completely eliminate stale data from previous candidates (SPA support)
-      tabFramesData[tabId] = {};
-
-      // 2. Broadcast active request to all frames in the tab to report their latest DOM text immediately
-      chrome.tabs.sendMessage(tabId, { action: 'REQUEST_FRAME_REPORT' }, () => {
-        // Suppress message routing mismatch warnings if frames are still loading
-        const err = chrome.runtime.lastError;
-      });
-
-      // 3. Wait for 350ms to gather all frame submissions (including nested sub-frames), then merge and respond to top frame
-      setTimeout(() => {
-        const reports = Object.values(tabFramesData[tabId] || {});
-        if (reports.length > 0) {
-          const merged = mergeResumeData(reports);
-          sendResponse({ success: true, data: merged });
-        } else {
-          sendResponse({ success: false, error: '이력서 영역의 프레임 데이터를 수집하지 못했습니다. 화면을 한 번 클릭한 뒤 다시 시도해 주세요.' });
-        }
-      }, 350);
+      const reports = Object.values(tabFramesData[tabId] || {});
+      if (reports.length > 0) {
+        const merged = mergeResumeData(reports);
+        sendResponse({ success: true, data: merged });
+      } else {
+        sendResponse({ success: false, error: '이력서 영역의 프레임 데이터를 수집하지 못했습니다. 화면을 한 번 클릭한 뒤 다시 시도해 주세요.' });
+      }
     } else {
       sendResponse({ success: false, error: '활성화된 탭 정보를 찾을 수 없습니다.' });
     }
-    return true; // Keep channel open for async setTimeout response
+    return true;
   }
 
   if (message.action === 'EXTRACT_JD_KEYWORDS') {

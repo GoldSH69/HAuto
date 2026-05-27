@@ -372,44 +372,48 @@ function findAllIframes(root = document) {
 
 // 4. Unified Data Requester Broker (Fires postMessage with recursive relay to capture nested cross-origin iframes)
 function requestMergedResumeData(callback) {
-  // A. Direct report from top-level parent frame itself
-  try {
-    const parentData = scrapeLocalFrameData();
-    safeSendMessage({
-      action: 'SUBMIT_FRAME_REPORT',
-      data: parentData
-    });
-  } catch (e) {
-    console.log('HAuto 부모 프레임 데이터 선제 보고 오류:', e.message);
-  }
-
-  // B. 💥 [Same-Origin Bypasser with Shadow DOM & Recursive Relay] 
-  // Send direct postMessage broadcasting to ALL iframe elements in the entire DOM (including Shadow DOM)
-  const iframes = findAllIframes(document);
-  iframes.forEach((iframe) => {
+  // 1. Tell background to reset the data bucket first to avoid race conditions
+  safeSendMessage({ action: 'RESET_TAB_DATA' }, () => {
+    // 2. Report top-level parent frame data
     try {
-      if (iframe.contentWindow) {
-        iframe.contentWindow.postMessage({ action: 'REQUEST_FRAME_REPORT_VIA_POSTMESSAGE' }, '*');
-      }
+      const parentData = scrapeLocalFrameData();
+      safeSendMessage({
+        action: 'SUBMIT_FRAME_REPORT',
+        data: parentData
+      });
     } catch (e) {
-      console.log('iframe postMessage 발송 오류:', e.message);
+      console.log('HAuto 부모 프레임 데이터 선제 보고 오류:', e.message);
     }
-  });
 
-  // C. Query background script for consolidated result (Background holds 350ms timeout to gather)
-  safeSendMessage({ action: 'GET_MERGED_RESUME_DATA' }, (response) => {
-    if (response && response.success && response.data) {
-      const resumeData = response.data;
-      
-      // 💥 [초강력 디버그 방어벽] 만약 조립에 성공했으나 생년월일이나 나이가 비어 있는 경우 디버그 패널 즉각 현출!
-      if (!resumeData.birth || !resumeData.age || resumeData.birth === '미탐지' || resumeData.age === '미탐지') {
-        showDebugModal(resumeData);
+    // 3. Broadcast scanning signal to all child frames recursively
+    const iframes = findAllIframes(document);
+    iframes.forEach((iframe) => {
+      try {
+        if (iframe.contentWindow) {
+          iframe.contentWindow.postMessage({ action: 'REQUEST_FRAME_REPORT_VIA_POSTMESSAGE' }, '*');
+        }
+      } catch (e) {
+        console.log('iframe postMessage 발송 오류:', e.message);
       }
-      
-      callback(resumeData);
-    } else {
-      alert('이력서 데이터 실시간 수집 실패: ' + (response ? response.error : '로딩 대기 중입니다. 새로고침 후 다시 시도해 주세요.'));
-    }
+    });
+
+    // 4. Wait 350ms to allow all frames to report, then retrieve the consolidated data
+    setTimeout(() => {
+      safeSendMessage({ action: 'GET_MERGED_RESUME_DATA' }, (response) => {
+        if (response && response.success && response.data) {
+          const resumeData = response.data;
+          
+          // 💥 [초강력 디버그 방어벽] 만약 조립에 성공했으나 생년월일이나 나이가 비어 있는 경우 디버그 패널 즉각 현출!
+          if (!resumeData.birth || !resumeData.age || resumeData.birth === '미탐지' || resumeData.age === '미탐지') {
+            showDebugModal(resumeData);
+          }
+          
+          callback(resumeData);
+        } else {
+          alert('이력서 데이터 실시간 수집 실패: ' + (response ? response.error : '로딩 대기 중입니다. 새로고침 후 다시 시도해 주세요.'));
+        }
+      });
+    }, 350);
   });
 }
 
