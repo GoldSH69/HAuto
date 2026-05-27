@@ -2,6 +2,7 @@
 // Responsible for page detection, UI insertion, and secure DOM scraping.
 
 const HAUTO_UI_ID = 'hauto-assistant-panel';
+var monitorIntervalId = null;
 
 // 💥 [Domain Guard]
 // Only start crawler and active monitors on portal domains or local debug setups to save memory and eliminate errors on arbitrary sites (like Naver, Daum, etc.)
@@ -841,7 +842,6 @@ function handleExcelDownload() {
 }
 
 // 9. Premium Real-Time Monitor Panel Update Loop
-let monitorIntervalId = null;
 
 function startMonitorUpdating() {
   if (monitorIntervalId) clearInterval(monitorIntervalId);
