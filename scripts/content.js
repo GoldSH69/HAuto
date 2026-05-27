@@ -5,8 +5,25 @@ const HAUTO_UI_ID = 'hauto-assistant-panel';
 
 // 1. Core initialization on page load
 initHAutoAssistant();
-// Start periodic auto-reporting from all frames
-startPeriodicReporting();
+
+// 💥 [Real-Time Message Handler] Listen to active requests from background worker to report current frame's DOM immediately
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.action === 'REQUEST_FRAME_REPORT') {
+    try {
+      const localData = scrapeLocalFrameData();
+      // Submit latest frame data directly to the background collection bucket
+      chrome.runtime.sendMessage({
+        action: 'SUBMIT_FRAME_REPORT',
+        data: localData
+      });
+      sendResponse({ success: true });
+    } catch (e) {
+      console.log('HAuto 실시간 프레임 보고 대기 중 오류:', e.message);
+      sendResponse({ success: false, error: e.message });
+    }
+  }
+  return true; // Keep channel open
+});
 
 function initHAutoAssistant() {
   // 💥 [Parent Frame Guard] Only inject floating UI into the top-level parent frame
@@ -245,7 +262,7 @@ function handleAiMatch() {
       return;
     }
 
-    // Retrieve combined multi-frame resume data
+    // Retrieve combined multi-frame resume data (Real-Time Broadcast Mode)
     chrome.runtime.sendMessage({ action: 'GET_MERGED_RESUME_DATA' }, (response) => {
       if (response && response.success && response.data) {
         const resumeData = response.data;
@@ -261,7 +278,7 @@ function handleAiMatch() {
           }
         });
       } else {
-        alert('이력서 데이터 병합 오류: ' + (response ? response.error : '로딩 대기 중입니다. 새로고침 후 다시 시도해 주세요.'));
+        alert('이력서 데이터 실시간 수집 실패: ' + (response ? response.error : '로딩 대기 중입니다. 새로고침 후 다시 시도해 주세요.'));
       }
     });
   });
@@ -290,7 +307,7 @@ function handleOfferMsg() {
           }
         });
       } else {
-        alert('이력서 데이터 병합 오류: ' + (response ? response.error : '로딩 대기 중입니다. 새로고침 후 다시 시도해 주세요.'));
+        alert('이력서 데이터 실시간 수집 실패: ' + (response ? response.error : '로딩 대기 중입니다. 새로고침 후 다시 시도해 주세요.'));
       }
     });
   });
@@ -302,7 +319,7 @@ function handleDbRegister() {
     if (response && response.success && response.data) {
       const resumeData = response.data;
       if (!resumeData.name || resumeData.name === "미탐지_후보자") {
-        alert('후보자 프로필 필수값(이름 등)을 파싱하지 못했습니다. 화면이 다 로드될 때까지 1~2초 후 다시 눌러보시거나 이력서 탭이 활성화되어 있는지 확인해주세요.');
+        alert('후보자 프로필 필수값(이름 등)을 파싱하지 못했습니다. 화면이 완전히 렌더링된 후 다시 눌러주세요.');
         return;
       }
 
@@ -335,7 +352,7 @@ function handleDbRegister() {
         }
       });
     } else {
-      alert('이력서 데이터 병합 오류: ' + (response ? response.error : '로딩 대기 중입니다. 새로고침 후 다시 시도해 주세요.'));
+      alert('이력서 데이터 실시간 수집 실패: ' + (response ? response.error : '로딩 대기 중입니다. 새로고침 후 다시 시도해 주세요.'));
     }
   });
 }
@@ -364,7 +381,7 @@ function handleCompetencyExtract() {
           }
         });
       } else {
-        alert('이력서 데이터 병합 오류: ' + (response ? response.error : '로딩 대기 중입니다. 새로고침 후 다시 시도해 주세요.'));
+        alert('이력서 데이터 실시간 수집 실패: ' + (response ? response.error : '로딩 대기 중입니다. 새로고침 후 다시 시도해 주세요.'));
       }
     });
   });
@@ -394,28 +411,6 @@ function scrapeCompanyJd() {
   }
 
   return text;
-}
-
-// Periodically upload current frame's resume data to background storage
-function startPeriodicReporting() {
-  // Report instantly on start
-  setTimeout(reportFrameData, 500);
-  setTimeout(reportFrameData, 1500);
-  
-  // Continuous periodic reporting every 2.0s to support dynamic changes & focus shifts
-  setInterval(reportFrameData, 2000);
-}
-
-function reportFrameData() {
-  try {
-    const resumeData = scrapeLocalFrameData();
-    chrome.runtime.sendMessage({
-      action: 'REPORT_FRAME_DATA',
-      data: resumeData
-    });
-  } catch (e) {
-    console.log('HAuto 프레임 데이터 백그라운드 자동 보고 대기:', e.message);
-  }
 }
 
 // 💥 [Secure Local Frame Scraper] Prevents same-origin security policies (CORS) by restricting access to its own frame's DOM
@@ -449,9 +444,9 @@ function scrapeLocalFrameData() {
     }
   }
 
-  // Name validation filters
-  const nameBlacklist = ["합격", "불합", "탈락", "서류", "면접", "진행", "결과", "상태", "이름", "성명", "인재", "포탈", "회원", "관리", "인재풀", "대기", "나이", "성별", "지원", "전형", "채용", "이력", "포지션", "구직", "구인", "이메일", "연락처", "전화", "컨설턴트"];
-  const isInvalidName = (n) => !n || n.trim() === "" || n.includes('미탐지') || n.includes('후보자') || n.length > 5 || nameBlacklist.some(b => n.includes(b));
+  // Name validation filters & blacklists (Navigation & action words excluded)
+  const nameBlacklist = ["합격", "불합", "탈락", "서류", "면접", "진행", "결과", "상태", "이름", "성명", "인재", "포탈", "회원", "관리", "인재풀", "대기", "나이", "성별", "지원", "전형", "채용", "이력", "포지션", "구직", "구인", "이메일", "연락처", "전화", "컨설턴트", "이동", "단계", "목록", "닫기", "열기", "인쇄", "다운", "수정", "삭제", "저장", "취소", "등록", "전송", "확인", "지원자", "후보자"];
+  const isInvalidName = (n) => !n || n.trim() === "" || n.includes('미탐지') || n.includes('후보자') || n.length < 2 || n.length > 4 || nameBlacklist.some(b => n.includes(b));
 
   if (isInvalidName(name)) {
     let cleanTitle = title.replace(/(이력서|사람인|잡코리아|JOBKOREA|saramin|포트폴리오|열람|보기|관리|상세|인재풀|인재|검색|후보자|목록|후|내역|다운로드|불합격|합격|서류|면접|최종|진행|상태|결과|통보|컨설턴트|[-|[\]()|:\s])/gi, '').trim();
@@ -641,7 +636,7 @@ function handleExcelDownload() {
         alert('엑셀 다운로드 실패: ' + err.message);
       }
     } else {
-      alert('이력서 데이터 병합 오류: ' + (response ? response.error : '로딩 대기 중입니다. 새로고침 후 다시 시도해 주세요.'));
+      alert('이력서 데이터 실시간 수집 실패: ' + (response ? response.error : '로딩 대기 중입니다. 새로고침 후 다시 시도해 주세요.'));
     }
   });
 }

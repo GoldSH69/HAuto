@@ -29,10 +29,10 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
 
 // Listen to message routing from Content Scripts
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.action === 'REPORT_FRAME_DATA') {
+  if (message.action === 'SUBMIT_FRAME_REPORT') {
     const tabId = sender.tab?.id;
-    const frameId = sender.frameId;
-    if (tabId !== undefined && frameId !== undefined) {
+    const frameId = sender.frameId !== undefined ? sender.frameId : (sender.url || 'default');
+    if (tabId !== undefined) {
       tabFramesData[tabId] = tabFramesData[tabId] || {};
       tabFramesData[tabId][frameId] = message.data;
     }
@@ -42,13 +42,30 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   if (message.action === 'GET_MERGED_RESUME_DATA') {
     const tabId = sender.tab?.id;
-    if (tabId !== undefined && tabFramesData[tabId]) {
-      const merged = mergeResumeData(Object.values(tabFramesData[tabId]));
-      sendResponse({ success: true, data: merged });
+    if (tabId !== undefined) {
+      // 1. Reset collection bucket for this tab to completely eliminate stale data from previous candidates (SPA support)
+      tabFramesData[tabId] = {};
+
+      // 2. Broadcast active request to all frames in the tab to report their latest DOM text immediately
+      chrome.tabs.sendMessage(tabId, { action: 'REQUEST_FRAME_REPORT' }, () => {
+        // Suppress message routing mismatch warnings if frames are still loading
+        const err = chrome.runtime.lastError;
+      });
+
+      // 3. Wait for 150ms to gather all frame submissions, then merge and respond to top frame
+      setTimeout(() => {
+        const reports = Object.values(tabFramesData[tabId] || {});
+        if (reports.length > 0) {
+          const merged = mergeResumeData(reports);
+          sendResponse({ success: true, data: merged });
+        } else {
+          sendResponse({ success: false, error: '이력서 영역의 프레임 데이터를 수집하지 못했습니다. 화면을 한 번 클릭한 뒤 다시 시도해 주세요.' });
+        }
+      }, 150);
     } else {
-      sendResponse({ success: false, error: '프레임 데이터가 아직 백그라운드에 수집되지 않았습니다. 뷰어 화면을 새로고침 해주세요.' });
+      sendResponse({ success: false, error: '활성화된 탭 정보를 찾을 수 없습니다.' });
     }
-    return true;
+    return true; // Keep channel open for async setTimeout response
   }
 
   if (message.action === 'EXTRACT_JD_KEYWORDS') {
@@ -300,8 +317,8 @@ function mergeResumeData(framesArray) {
   let coverLetter = '';
   let rawText = '';
 
-  const nameBlacklist = ["합격", "불합", "탈락", "서류", "면접", "진행", "결과", "상태", "이름", "성명", "인재", "포탈", "회원", "관리", "인재풀", "대기", "나이", "성별", "지원", "전형", "채용", "이력", "포지션", "구직", "구인", "이메일", "연락처", "전화", "컨설턴트"];
-  const isInvalidName = (n) => !n || n.trim() === "" || n.includes('미탐지') || n.includes('후보자') || n.length > 5 || nameBlacklist.some(b => n.includes(b));
+  const nameBlacklist = ["합격", "불합", "탈락", "서류", "면접", "진행", "결과", "상태", "이름", "성명", "인재", "포탈", "회원", "관리", "인재풀", "대기", "나이", "성별", "지원", "전형", "채용", "이력", "포지션", "구직", "구인", "이메일", "연락처", "전화", "컨설턴트", "이동", "단계", "목록", "닫기", "열기", "인쇄", "다운", "수정", "삭제", "저장", "취소", "등록", "전송", "확인", "지원자", "후보자"];
+  const isInvalidName = (n) => !n || n.trim() === "" || n.includes('미탐지') || n.includes('후보자') || n.length < 2 || n.length > 4 || nameBlacklist.some(b => n.includes(b));
 
   // 1. Combine rawText from all frames
   rawText = framesArray.map(f => f.rawText || '').join('\n\n');
