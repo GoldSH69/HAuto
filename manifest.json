@@ -35,7 +35,8 @@
         "scripts/content.js"
       ],
       "run_at": "document_end",
-      "all_frames": true
+      "all_frames": true,
+      "match_about_blank": true
     }
   ]
 }
