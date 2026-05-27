@@ -5,6 +5,8 @@ const HAUTO_UI_ID = 'hauto-assistant-panel';
 
 // 1. Core initialization on page load
 initHAutoAssistant();
+// Start background monitoring updates
+startMonitorUpdating();
 
 // 💥 [ 우주급 프레임 관통 릴레이 postMessage 수신기 ]
 // CORS(동종기원정책) 보안 장벽을 우회하여, 2중 및 N중 중첩 iframe까지도 신호를 릴레이 전파하여 모든 프레임의 데이터를 백그라운드로 전송합니다.
@@ -229,7 +231,13 @@ function injectFloatingPanel(pageType) {
     `;
   }
 
-  btnHtml += `<div class="hauto-footer">집 & 사무실 자동 연동 중</div>`;
+  btnHtml += `
+    <div class="hauto-monitor" style="font-size: 9px; color: #a78bfa; margin-top: 10px; padding-top: 8px; border-top: 1px dashed #2d3754; text-align: left; line-height: 1.4;">
+      ⏳ 실시간 분석 대기 중...
+    </div>
+  `;
+
+  btnHtml += `<div class="hauto-footer" style="margin-top:8px;">집 & 사무실 자동 연동 중</div>`;
   panel.innerHTML = btnHtml;
   document.body.appendChild(panel);
 
@@ -280,7 +288,14 @@ function requestMergedResumeData(callback) {
   // C. Query background script for consolidated result (Background holds 350ms timeout to gather)
   chrome.runtime.sendMessage({ action: 'GET_MERGED_RESUME_DATA' }, (response) => {
     if (response && response.success && response.data) {
-      callback(response.data);
+      const resumeData = response.data;
+      
+      // 💥 [초강력 디버그 방어벽] 만약 조립에 성공했으나 생년월일이나 나이가 비어 있는 경우 디버그 패널 즉각 현출!
+      if (!resumeData.birth || !resumeData.age || resumeData.birth === '미탐지' || resumeData.age === '미탐지') {
+        showDebugModal(resumeData);
+      }
+      
+      callback(resumeData);
     } else {
       alert('이력서 데이터 실시간 수집 실패: ' + (response ? response.error : '로딩 대기 중입니다. 새로고침 후 다시 시도해 주세요.'));
     }
@@ -695,5 +710,100 @@ function handleExcelDownload() {
     } catch (err) {
       alert('엑셀 다운로드 실패: ' + err.message);
     }
+  });
+}
+
+// 9. Premium Real-Time Monitor Panel Update Loop
+function startMonitorUpdating() {
+  // Update loop: every 3.0s to dynamically adjust to portal page content
+  setInterval(() => {
+    // A. Broadcast sub-frame postMessages dynamically to gather DOM text in real time
+    const iframes = document.querySelectorAll('iframe');
+    iframes.forEach((iframe) => {
+      try {
+        if (iframe.contentWindow) {
+          iframe.contentWindow.postMessage({ action: 'REQUEST_FRAME_REPORT_VIA_POSTMESSAGE' }, '*');
+        }
+      } catch (e) {}
+    });
+
+    // B. Fetch merged data from background worker to update visual monitor indicator
+    chrome.runtime.sendMessage({ action: 'GET_MERGED_RESUME_DATA' }, (response) => {
+      if (response && response.success && response.data) {
+        const resumeData = response.data;
+        const monitorEl = document.querySelector('.hauto-monitor');
+        if (monitorEl) {
+          let statusText = `👤 <strong>이름:</strong> ${resumeData.name || '미탐지'}<br>`;
+          statusText += `📅 <strong>생년:</strong> ${resumeData.birth || '❌ 미탐지'}<br>`;
+          statusText += `🎂 <strong>나이:</strong> ${resumeData.age || '❌ 미탐지'}`;
+          monitorEl.innerHTML = statusText;
+        }
+      }
+    });
+  }, 3000);
+}
+
+// 10. Ultimate Debug Modal for diagnostic text harvesting
+function showDebugModal(resumeData) {
+  // Remove existing
+  const oldModal = document.querySelector('.hauto-debug-modal');
+  if (oldModal) oldModal.remove();
+
+  const modal = document.createElement('div');
+  modal.className = 'hauto-debug-modal';
+  modal.style.cssText = `
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 520px;
+    background: linear-gradient(135deg, #1e152a 0%, #0d0714 100%);
+    border: 2px solid #ef4444;
+    border-radius: 16px;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.9);
+    padding: 24px;
+    z-index: 100005;
+    color: #f1f5f9;
+    font-family: 'Outfit', sans-serif;
+  `;
+
+  modal.innerHTML = `
+    <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid #3b204c; padding-bottom:12px; margin-bottom:16px;">
+      <h3 style="font-size:15px; font-weight:700; color:#ef4444; margin:0; display:flex; align-items:center; gap:8px;">
+        ⚠️ HAuto 인적사항(생년월일/나이) 분석 디버그 패널
+      </h3>
+      <button class="debug-close" style="background:none; border:none; color:#94a3b8; font-size:20px; cursor:pointer;">&times;</button>
+    </div>
+    <div style="font-size:12px; line-height:1.6; color:#cbd5e1; margin-bottom:14px;">
+      <p style="margin: 0 0 8px 0; font-weight:600; color:#f8fafc;">
+        후보자 이름(<strong>${resumeData.name}</strong>)은 찾았으나 생년월일/나이 분석에 실패했습니다.
+      </p>
+      <p style="margin:0;">
+        현재 비서가 화면 내 모든 프레임(iframe 포함)에서 긁어온 <strong>실시간 전체 텍스트</strong>는 아래와 같습니다. 아래 상자 안의 텍스트를 전체 복사하여 채팅창에 붙여넣어 주시면 즉시 정밀 튜닝해 드리겠습니다!
+      </p>
+    </div>
+    <textarea style="width:100%; height:220px; background-color:#08030c; color:#38bdf8; border:1px solid #3b204c; border-radius:8px; padding:12px; font-size:11px; font-family:monospace; resize:none; margin-bottom:16px;" readonly>${resumeData.rawText || '(수집된 텍스트가 완전히 비어 있습니다)'}</textarea>
+    <div style="display:flex; justify-content:flex-end; gap:10px;">
+      <button class="debug-copy-btn" style="background-color:#ef4444; border:none; color:#fff; font-size:11px; font-weight:600; padding:9px 16px; border-radius:8px; cursor:pointer;">디버그 텍스트 복사하기</button>
+      <button class="debug-close-btn" style="background-color:#1d1226; border:1px solid #3b204c; color:#cbd5e1; font-size:11px; font-weight:600; padding:9px 16px; border-radius:8px; cursor:pointer;">닫기</button>
+    </div>
+  `;
+
+  document.body.appendChild(modal);
+
+  const close = () => modal.remove();
+  modal.querySelector('.debug-close').addEventListener('click', close);
+  modal.querySelector('.debug-close-btn').addEventListener('click', close);
+
+  modal.querySelector('.debug-copy-btn').addEventListener('click', () => {
+    navigator.clipboard.writeText(resumeData.rawText).then(() => {
+      const btn = modal.querySelector('.debug-copy-btn');
+      btn.textContent = '복사 완료! 채팅창에 붙여넣어 주세요.';
+      btn.style.backgroundColor = '#10B981';
+      setTimeout(() => {
+        btn.textContent = '디버그 텍스트 복사하기';
+        btn.style.backgroundColor = '#ef4444';
+      }, 2000);
+    });
   });
 }
