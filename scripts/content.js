@@ -51,11 +51,21 @@ window.addEventListener('message', (event) => {
   }
 });
 
+// 💥 [Extension Context Validator]
+// Checks if the extension context is still valid. Accessing chrome.runtime.id will throw an error if the context is invalidated.
+function isContextValid() {
+  try {
+    return typeof chrome !== 'undefined' && chrome.runtime && !!chrome.runtime.id;
+  } catch (e) {
+    return false;
+  }
+}
+
 // 크롬 표준 런타임 메시지 수신기 (동일 프레임 통신용)
 try {
   if (chrome.runtime && chrome.runtime.onMessage) {
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-      if (!isTargetDomain) return;
+      if (!isContextValid() || !isTargetDomain) return;
       
       if (message.action === 'REQUEST_FRAME_REPORT') {
         try {
@@ -78,21 +88,58 @@ try {
 }
 
 // 💥 [Safe Message Sender Proxy] 
-// Prevents "Extension context invalidated" crashes during extension updates by evaluating runtime status actively before fetch
+// Prevents "Extension context invalidated" crashes during extension updates by evaluating runtime status actively before fetch.
+// Uses MV3 Promise-based invocation to completely prevent unhandled asynchronous invalidation callback exceptions.
 function safeSendMessage(message, callback) {
+  if (!isContextValid()) {
+    return false;
+  }
   try {
-    if (!chrome.runtime || !chrome.runtime.id) {
-      // Safe skip if extension was reloaded and page has not refreshed yet
-      return false;
-    }
-    chrome.runtime.sendMessage(message, (response) => {
-      // Catch chrome.runtime.lastError to suppress unhandled promise rejections
-      const err = chrome.runtime.lastError;
-      if (callback && !err) callback(response);
+    chrome.runtime.sendMessage(message)
+      .then((response) => {
+        if (callback) callback(response);
+      })
+      .catch((err) => {
+        // Suppress asynchronous context invalidation errors silently
+        console.log('HAuto: sendMessage digested error:', err.message);
+      });
+    return true;
+  } catch (e) {
+    // Graceful error digestion for synchronous invalidation errors
+    return false;
+  }
+}
+
+// 💥 [Safe Storage Local Accessors]
+// Prevents storage retrieval crashes when context gets invalidated.
+function safeStorageGet(keys, callback) {
+  if (!isContextValid()) return false;
+  try {
+    chrome.storage.local.get(keys, (res) => {
+      if (chrome.runtime.lastError) {
+        console.log('HAuto: storage get digested error:', chrome.runtime.lastError.message);
+        return;
+      }
+      if (callback) callback(res);
     });
     return true;
   } catch (e) {
-    // Graceful error digestion
+    return false;
+  }
+}
+
+function safeStorageSet(items, callback) {
+  if (!isContextValid()) return false;
+  try {
+    chrome.storage.local.set(items, () => {
+      if (chrome.runtime.lastError) {
+        console.log('HAuto: storage set digested error:', chrome.runtime.lastError.message);
+        return;
+      }
+      if (callback) callback();
+    });
+    return true;
+  } catch (e) {
     return false;
   }
 }
@@ -392,14 +439,17 @@ function handleSetActiveJd() {
     return;
   }
   
-  chrome.storage.local.set({ activeJd: jdText }, () => {
+  const success = safeStorageSet({ activeJd: jdText }, () => {
     alert('🎯 현재 화면의 JD가 매칭 분석 기준으로 정상 설정되었습니다.');
   });
+  if (!success) {
+    alert('HAuto: 확장 프로그램이 업데이트되었습니다. 페이지를 새로고침해 주세요.');
+  }
 }
 
 // B. Candidate Matching Analysis (Saramin/Jobkorea)
 function handleAiMatch() {
-  chrome.storage.local.get(['activeJd'], (res) => {
+  const success = safeStorageGet(['activeJd'], (res) => {
     if (!res.activeJd) {
       alert('사내 시스템 JD 페이지에서 [현재 JD 타겟 지정]을 먼저 완료해주세요.');
       return;
@@ -419,11 +469,14 @@ function handleAiMatch() {
       });
     });
   });
+  if (!success) {
+    alert('HAuto: 확장 프로그램이 업데이트되었습니다. 페이지를 새로고침해 주세요.');
+  }
 }
 
 // C. Dynamic personalized offer letter creation
 function handleOfferMsg() {
-  chrome.storage.local.get(['activeJd'], (res) => {
+  const success = safeStorageGet(['activeJd'], (res) => {
     if (!res.activeJd) {
       alert('사내 시스템 JD 페이지에서 [현재 JD 타겟 지정]을 먼저 완료해주세요.');
       return;
@@ -443,6 +496,9 @@ function handleOfferMsg() {
       });
     });
   });
+  if (!success) {
+    alert('HAuto: 확장 프로그램이 업데이트되었습니다. 페이지를 새로고침해 주세요.');
+  }
 }
 
 // D. DB Register (Google Sheets + Notion)
@@ -486,7 +542,7 @@ function handleDbRegister() {
 
 // E. Core Competency & Cover Letter Extraction (On-Demand)
 function handleCompetencyExtract() {
-  chrome.storage.local.get(['activeJd'], (res) => {
+  const success = safeStorageGet(['activeJd'], (res) => {
     if (!res.activeJd) {
       alert('사내 시스템 JD 페이지에서 [현재 JD 타겟 지정]을 먼저 완료해주세요.');
       return;
@@ -507,6 +563,9 @@ function handleCompetencyExtract() {
       });
     });
   });
+  if (!success) {
+    alert('HAuto: 확장 프로그램이 업데이트되었습니다. 페이지를 새로고침해 주세요.');
+  }
 }
 
 // 6. Intelligent Scraping Helpers (Portal Page & Company specific)
@@ -787,7 +846,7 @@ function startMonitorUpdating() {
   monitorIntervalId = setInterval(() => {
     // 💥 [Self-Destruct Pin on Invalid Context]
     // If extension is updated/reloaded and tab is not refreshed, cleanly stop setInterval to prevent Uncaught Error crashes.
-    if (!chrome.runtime || !chrome.runtime.id) {
+    if (!isContextValid()) {
       clearInterval(monitorIntervalId);
       return;
     }
