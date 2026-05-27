@@ -10,6 +10,14 @@ function initHAutoAssistant() {
   // Check if assistant is already injected
   if (document.getElementById(HAUTO_UI_ID)) return;
 
+  // 💥 [Iframe 가드] 텍스트가 너무 적은 로딩 창이나 메뉴판 껍데기 프레임에는 주입 차단
+  const bodyText = document.body ? document.body.innerText.trim() : "";
+  if (bodyText.length < 250) {
+    // 텍스트가 채워질 때까지 1.5초마다 지연 재검사
+    setTimeout(initHAutoAssistant, 1500);
+    return;
+  }
+
   const currentUrl = window.location.href;
   let pageType = 'unknown';
 
