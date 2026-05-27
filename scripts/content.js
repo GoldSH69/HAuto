@@ -166,6 +166,7 @@ function injectFloatingPanel(pageType) {
       <button class="hauto-btn" id="btn-ai-match">🤖 후보자 매칭 분석 (2단)</button>
       <button class="hauto-btn" id="btn-offer-msg">✉️ 제안문 작성 (3단)</button>
       <button class="hauto-btn accent" id="btn-db-register">💾 구글시트/노션 저장</button>
+      <button class="hauto-btn" id="btn-excel-download" style="background-color: #22c55e;">📊 즉시 엑셀파일 다운로드</button>
       <button class="hauto-btn" id="btn-competency">🔍 핵심역량/자소서 추출</button>
     `;
   }
@@ -187,6 +188,7 @@ function bindPanelEvents(pageType) {
     document.getElementById('btn-ai-match').addEventListener('click', handleAiMatch);
     document.getElementById('btn-offer-msg').addEventListener('click', handleOfferMsg);
     document.getElementById('btn-db-register').addEventListener('click', handleDbRegister);
+    document.getElementById('btn-excel-download').addEventListener('click', handleExcelDownload);
     document.getElementById('btn-competency').addEventListener('click', handleCompetencyExtract);
   }
 }
@@ -463,4 +465,53 @@ function showResultModal(title, content) {
       }, 1500);
     });
   });
+}
+
+// 7. Instant Local Excel (CSV) Download Handler
+function handleExcelDownload() {
+  const resumeData = scrapeResumeData();
+  if (!resumeData.name) {
+    alert('후보자 정보를 화면에서 파싱하지 못했습니다. 채용 포탈의 이력서 보기 화면이 맞는지 확인해 주세요.');
+    return;
+  }
+
+  // Create CSV Content with BOM (prevents Korean character corruption in MS Excel)
+  const headers = ["등록일", "이름", "연락처", "이메일", "주요 기술", "경력 정보", "진행상태", "상태 변경일", "비고"];
+  const dateStr = new Date().toLocaleDateString('ko-KR');
+  
+  // Clean text from commas and newlines for CSV format safety
+  const clean = (val) => {
+    if (!val) return "";
+    // Wrap with double quotes and escape internal quotes & remove newlines for beautiful CSV rows
+    return `"${val.replace(/"/g, '""').replace(/[\r\n\t]/g, ' ')}"`;
+  };
+
+  const row = [
+    clean(dateStr),
+    clean(resumeData.name),
+    clean(resumeData.phone),
+    clean(resumeData.email),
+    clean(resumeData.skills),
+    clean(resumeData.experience),
+    clean("제안 수락 대기"),
+    clean(dateStr), // 상태 변경일 기본값
+    clean("") // 비고 공란
+  ];
+
+  const csvContent = "\ufeff" + headers.join(",") + "\n" + row.join(",");
+  
+  // Dynamic Download Action
+  try {
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `HAuto_후보자_${resumeData.name.replace(/[\s/]/g, '_')}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    alert('엑셀 다운로드 실패: ' + err.message);
+  }
 }
