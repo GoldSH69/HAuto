@@ -452,6 +452,33 @@ function scrapeResumeData() {
   const emailMatch = rawText.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
   email = emailMatch ? emailMatch[0] : '';
 
+  // 3-B. 💥 [생년월일 & 나이 정밀 분석 엔진]
+  let birth = '';
+  let age = '';
+
+  // A. 나이 추출 (예: "32세" 또는 "(남, 29)")
+  const ageMatch = rawText.match(/(\d{2})세/);
+  if (ageMatch) {
+    age = ageMatch[1] + "세";
+  } else {
+    const ageMatch2 = rawText.match(/\(\s*(남|여)?\s*,?\s*(\d{2})\s*\)/);
+    if (ageMatch2) age = ageMatch2[2] + "세";
+  }
+
+  // B. 생년월일 추출 (예: "1994년 5월 12일" 또는 "1995.03.11" 또는 "94년생")
+  const birthMatch = rawText.match(/(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일/);
+  if (birthMatch) {
+    birth = `${birthMatch[1]}.${birthMatch[2].padStart(2, '0')}.${birthMatch[3].padStart(2, '0')}`;
+  } else {
+    const birthMatch2 = rawText.match(/(19|20)\d{2}[.-]\d{2}[.-]\d{2}/);
+    if (birthMatch2) {
+      birth = birthMatch2[0].replace(/-/g, '.');
+    } else {
+      const birthMatch3 = rawText.match(/(\d{2,4})년생/);
+      if (birthMatch3) birth = birthMatch3[1] + "년생";
+    }
+  }
+
   // 4. 주요 기술 추출 (클래스 매칭 실패 시 텍스트 지능형 문맥 분석)
   const skillSelectors = ['.wrap_tag', '.list_skill', '.skill-tag', '.skills', '[class*="skill"]', '.tag_skill'];
   for (let s of skillSelectors) {
