@@ -6,23 +6,39 @@ const HAUTO_UI_ID = 'hauto-assistant-panel';
 // 1. Core initialization on page load
 initHAutoAssistant();
 
-// 💥 [Real-Time Message Handler] Listen to active requests from background worker to report current frame's DOM immediately
+// 💥 [Cross-Origin postMessage Listener]
+// Bypasses Same-Origin security policies by listening to direct postMessages from parent frame.
+// Reports its own frame's DOM data to background immediately upon receiving request.
+window.addEventListener('message', (event) => {
+  if (event.data && event.data.action === 'REQUEST_FRAME_REPORT_VIA_POSTMESSAGE') {
+    try {
+      const localData = scrapeLocalFrameData();
+      chrome.runtime.sendMessage({
+        action: 'SUBMIT_FRAME_REPORT',
+        data: localData
+      });
+    } catch (e) {
+      console.log('HAuto 하위 프레임 실시간 보고 전송 오류:', e.message);
+    }
+  }
+});
+
+// Also keep standard runtime message listener as fallback
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'REQUEST_FRAME_REPORT') {
     try {
       const localData = scrapeLocalFrameData();
-      // Submit latest frame data directly to the background collection bucket
       chrome.runtime.sendMessage({
         action: 'SUBMIT_FRAME_REPORT',
         data: localData
       });
       sendResponse({ success: true });
     } catch (e) {
-      console.log('HAuto 실시간 프레임 보고 대기 중 오류:', e.message);
+      console.log('HAuto 런타임 메시지 보고 실패:', e.message);
       sendResponse({ success: false, error: e.message });
     }
   }
-  return true; // Keep channel open
+  return true;
 });
 
 function initHAutoAssistant() {
@@ -223,7 +239,42 @@ function bindPanelEvents(pageType) {
   }
 }
 
-// 4. Automation Action Handlers
+// 4. Unified Data Requester Broker (Fires postMessage to bypass Same-Origin Restrictions in real time)
+function requestMergedResumeData(callback) {
+  // A. Direct report from top-level parent frame itself
+  try {
+    const parentData = scrapeLocalFrameData();
+    chrome.runtime.sendMessage({
+      action: 'SUBMIT_FRAME_REPORT',
+      data: parentData
+    });
+  } catch (e) {
+    console.log('HAuto 부모 프레임 데이터 선제 보고 오류:', e.message);
+  }
+
+  // B. 💥 [Same-Origin Bypasser] Send direct postMessage broadcasting to ALL iframe elements
+  const iframes = document.querySelectorAll('iframe');
+  iframes.forEach((iframe) => {
+    try {
+      if (iframe.contentWindow) {
+        iframe.contentWindow.postMessage({ action: 'REQUEST_FRAME_REPORT_VIA_POSTMESSAGE' }, '*');
+      }
+    } catch (e) {
+      console.log('iframe postMessage 발송 오류:', e.message);
+    }
+  });
+
+  // C. Query background script for consolidated result (Background holds 150ms timeout to gather)
+  chrome.runtime.sendMessage({ action: 'GET_MERGED_RESUME_DATA' }, (response) => {
+    if (response && response.success && response.data) {
+      callback(response.data);
+    } else {
+      alert('이력서 데이터 실시간 수집 실패: ' + (response ? response.error : '로딩 대기 중입니다. 새로고침 후 다시 시도해 주세요.'));
+    }
+  });
+}
+
+// 5. Automation Action Handlers
 
 // A. Scrape Job Description from Company System
 function handleExtractJd() {
@@ -262,24 +313,18 @@ function handleAiMatch() {
       return;
     }
 
-    // Retrieve combined multi-frame resume data (Real-Time Broadcast Mode)
-    chrome.runtime.sendMessage({ action: 'GET_MERGED_RESUME_DATA' }, (response) => {
-      if (response && response.success && response.data) {
-        const resumeData = response.data;
-        chrome.runtime.sendMessage({
-          action: 'RUN_AI_MATCHING',
-          jd: res.activeJd,
-          resume: resumeData.rawText
-        }, (resMatch) => {
-          if (resMatch && resMatch.success) {
-            showResultModal('AI 후보자 매칭 적합도 분석', resMatch.data);
-          } else {
-            alert('AI 매칭 분석 실패: ' + (resMatch ? resMatch.error : '키가 설정되지 않았거나 통신 장애입니다.'));
-          }
-        });
-      } else {
-        alert('이력서 데이터 실시간 수집 실패: ' + (response ? response.error : '로딩 대기 중입니다. 새로고침 후 다시 시도해 주세요.'));
-      }
+    requestMergedResumeData((resumeData) => {
+      chrome.runtime.sendMessage({
+        action: 'RUN_AI_MATCHING',
+        jd: res.activeJd,
+        resume: resumeData.rawText
+      }, (resMatch) => {
+        if (resMatch && resMatch.success) {
+          showResultModal('AI 후보자 매칭 적합도 분석', resMatch.data);
+        } else {
+          alert('AI 매칭 분석 실패: ' + (resMatch ? resMatch.error : '키가 설정되지 않았거나 통신 장애입니다.'));
+        }
+      });
     });
   });
 }
@@ -292,68 +337,58 @@ function handleOfferMsg() {
       return;
     }
 
-    chrome.runtime.sendMessage({ action: 'GET_MERGED_RESUME_DATA' }, (response) => {
-      if (response && response.success && response.data) {
-        const resumeData = response.data;
-        chrome.runtime.sendMessage({
-          action: 'GENERATE_OFFER_MSG',
-          jd: res.activeJd,
-          resume: resumeData.rawText
-        }, (resMsg) => {
-          if (resMsg && resMsg.success) {
-            showResultModal('AI 개인화 제안 메시지 초안', resMsg.data);
-          } else {
-            alert('제안문 생성 오류: ' + (resMsg ? resMsg.error : '통신 실패'));
-          }
-        });
-      } else {
-        alert('이력서 데이터 실시간 수집 실패: ' + (response ? response.error : '로딩 대기 중입니다. 새로고침 후 다시 시도해 주세요.'));
-      }
+    requestMergedResumeData((resumeData) => {
+      chrome.runtime.sendMessage({
+        action: 'GENERATE_OFFER_MSG',
+        jd: res.activeJd,
+        resume: resumeData.rawText
+      }, (resMsg) => {
+        if (resMsg && resMsg.success) {
+          showResultModal('AI 개인화 제안 메시지 초안', resMsg.data);
+        } else {
+          alert('제안문 생성 오류: ' + (resMsg ? resMsg.error : '통신 실패'));
+        }
+      });
     });
   });
 }
 
 // D. DB Register (Google Sheets + Notion)
 function handleDbRegister() {
-  chrome.runtime.sendMessage({ action: 'GET_MERGED_RESUME_DATA' }, (response) => {
-    if (response && response.success && response.data) {
-      const resumeData = response.data;
-      if (!resumeData.name || resumeData.name === "미탐지_후보자") {
-        alert('후보자 프로필 필수값(이름 등)을 파싱하지 못했습니다. 화면이 완전히 렌더링된 후 다시 눌러주세요.');
-        return;
-      }
-
-      // Visual state change
-      const btn = document.getElementById('btn-db-register');
-      const originText = btn.textContent;
-      btn.textContent = '⚡ 처리 중...';
-      btn.disabled = true;
-
-      chrome.runtime.sendMessage({
-        action: 'REGISTER_CANDIDATE',
-        data: {
-          name: resumeData.name,
-          phone: resumeData.phone,
-          email: resumeData.email,
-          birth: resumeData.birth,
-          age: resumeData.age,
-          skills: resumeData.skills,
-          experience: resumeData.experience,
-          rawText: resumeData.rawText
-        }
-      }, (resReg) => {
-        btn.textContent = originText;
-        btn.disabled = false;
-        
-        if (resReg && resReg.success) {
-          alert(`💾 [${resumeData.name}] 후보자 등록이 구글 스프레드시트 및 Notion DB에 완료되었습니다!`);
-        } else {
-          alert('DB 저장 실패: ' + (resReg ? resReg.error : '설정 정보를 확인하거나 Google Apps Script 연동을 점검하세요.'));
-        }
-      });
-    } else {
-      alert('이력서 데이터 실시간 수집 실패: ' + (response ? response.error : '로딩 대기 중입니다. 새로고침 후 다시 시도해 주세요.'));
+  requestMergedResumeData((resumeData) => {
+    if (!resumeData.name || resumeData.name === "미탐지_후보자") {
+      alert('후보자 프로필 필수값(이름 등)을 파싱하지 못했습니다. 화면이 완전히 렌더링된 후 다시 눌러주세요.');
+      return;
     }
+
+    // Visual state change
+    const btn = document.getElementById('btn-db-register');
+    const originText = btn.textContent;
+    btn.textContent = '⚡ 처리 중...';
+    btn.disabled = true;
+
+    chrome.runtime.sendMessage({
+      action: 'REGISTER_CANDIDATE',
+      data: {
+        name: resumeData.name,
+        phone: resumeData.phone,
+        email: resumeData.email,
+        birth: resumeData.birth,
+        age: resumeData.age,
+        skills: resumeData.skills,
+        experience: resumeData.experience,
+        rawText: resumeData.rawText
+      }
+    }, (resReg) => {
+      btn.textContent = originText;
+      btn.disabled = false;
+      
+      if (resReg && resReg.success) {
+        alert(`💾 [${resumeData.name}] 후보자 등록이 구글 스프레드시트 및 Notion DB에 완료되었습니다!`);
+      } else {
+        alert('DB 저장 실패: ' + (resReg ? resReg.error : '설정 정보를 확인하거나 Google Apps Script 연동을 점검하세요.'));
+      }
+    });
   });
 }
 
@@ -365,29 +400,24 @@ function handleCompetencyExtract() {
       return;
     }
 
-    chrome.runtime.sendMessage({ action: 'GET_MERGED_RESUME_DATA' }, (response) => {
-      if (response && response.success && response.data) {
-        const resumeData = response.data;
-        chrome.runtime.sendMessage({
-          action: 'EXTRACT_COMPETENCY',
-          jd: res.activeJd,
-          resume: resumeData.rawText,
-          coverLetter: resumeData.coverLetter
-        }, (resComp) => {
-          if (resComp && resComp.success) {
-            showResultModal('AI 핵심역량 및 자소서 분석 요약', resComp.data);
-          } else {
-            alert('역량 추출 실패: ' + (resComp ? resComp.error : '오류'));
-          }
-        });
-      } else {
-        alert('이력서 데이터 실시간 수집 실패: ' + (response ? response.error : '로딩 대기 중입니다. 새로고침 후 다시 시도해 주세요.'));
-      }
+    requestMergedResumeData((resumeData) => {
+      chrome.runtime.sendMessage({
+        action: 'EXTRACT_COMPETENCY',
+        jd: res.activeJd,
+        resume: resumeData.rawText,
+        coverLetter: resumeData.coverLetter
+      }, (resComp) => {
+        if (resComp && resComp.success) {
+          showResultModal('AI 핵심역량 및 자소서 분석 요약', resComp.data);
+        } else {
+          alert('역량 추출 실패: ' + (resComp ? resComp.error : '오류'));
+        }
+      });
     });
   });
 }
 
-// 5. Intelligent Scraping Helpers (Portal Page & Company specific)
+// 6. Intelligent Scraping Helpers (Portal Page & Company specific)
 
 function scrapeCompanyJd() {
   // Scrapes job description main container. Fallback to selection if container is unclear.
@@ -413,7 +443,7 @@ function scrapeCompanyJd() {
   return text;
 }
 
-// 💥 [Secure Local Frame Scraper] Prevents same-origin security policies (CORS) by restricting access to its own frame's DOM
+// 💥 [Secure Local Frame Scraper] Restricts crawling strictly to its own frame DOM. Bypasses CORS.
 function scrapeLocalFrameData() {
   const rawText = document.body ? document.body.innerText : '';
   const title = document.title;
@@ -427,7 +457,7 @@ function scrapeLocalFrameData() {
   let experience = '';
   let coverLetter = '';
 
-  // 1. Name Parsing: find selectors in its own DOM
+  // A. Name Parsing: find selectors in its own DOM
   const nameSelectors = [
     '.info_general h1', '.info_general .c_black', '.info_name', '.name', '.name-area',
     '.user_name', '.user-name', '.profile-name', 'h1', 'h2', 'h3', '.profile_name',
@@ -456,41 +486,50 @@ function scrapeLocalFrameData() {
     }
   }
 
-  // 2. Phone Contact & Email
+  // B. Phone Contact & Email
   const phoneMatch = rawText.match(/010[-.\s]?\d{3,4}[-.\s]?\d{4}/);
   phone = phoneMatch ? phoneMatch[0] : '';
 
   const emailMatch = rawText.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
   email = emailMatch ? emailMatch[0] : '';
 
-  // 3. Age & Birth parsing
-  const ageMatch = rawText.match(/(\d{2})세/);
-  if (ageMatch) {
-    age = ageMatch[1] + "세";
+  // C. 💥 [Ultra-Precise Birth & Age Parser] Highly targeted Korean recruiting standard parser
+  // Matches "남, 1978 (47세)", "여, 1989 (37세)", "1994 (32세)"
+  const commonAgePattern = /(19|20)\d{2}\s*\(\s*(\d{2})세\s*\)/;
+  const matchCommon = rawText.match(commonAgePattern);
+  if (matchCommon) {
+    birth = matchCommon[1] + matchCommon[0].substring(2, 4) + "년"; // e.g. "1978년"
+    age = matchCommon[2] + "세"; // e.g. "47세"
   } else {
-    const ageMatch2 = rawText.match(/\(\s*(남|여)?\s*,?\s*(\d{2})\s*\)/);
-    if (ageMatch2) age = ageMatch2[2] + "세";
-  }
-
-  const birthMatchSpecial = rawText.match(/(\d{4})\s*\(\s*\d{2}세/);
-  if (birthMatchSpecial) {
-    birth = birthMatchSpecial[1] + "년";
-  } else {
-    const birthMatch = rawText.match(/(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일/);
-    if (birthMatch) {
-      birth = `${birthMatch[1]}.${birthMatch[2].padStart(2, '0')}.${birthMatch[3].padStart(2, '0')}`;
+    // Fallbacks
+    const ageMatch = rawText.match(/(\d{2})세/);
+    if (ageMatch) {
+      age = ageMatch[1] + "세";
     } else {
-      const birthMatch2 = rawText.match(/(19|20)\d{2}[.-]\d{2}[.-]\d{2}/);
-      if (birthMatch2) {
-        birth = birthMatch2[0].replace(/-/g, '.');
+      const ageMatch2 = rawText.match(/\(\s*(남|여)?\s*,?\s*(\d{2})\s*\)/);
+      if (ageMatch2) age = ageMatch2[2] + "세";
+    }
+
+    const birthMatchSpecial = rawText.match(/(\d{4})\s*\(\s*\d{2}세/);
+    if (birthMatchSpecial) {
+      birth = birthMatchSpecial[1] + "년";
+    } else {
+      const birthMatch = rawText.match(/(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일/);
+      if (birthMatch) {
+        birth = `${birthMatch[1]}.${birthMatch[2].padStart(2, '0')}.${birthMatch[3].padStart(2, '0')}`;
       } else {
-        const birthMatch3 = rawText.match(/(\d{2,4})년생/);
-        if (birthMatch3) birth = birthMatch3[1] + "년생";
+        const birthMatch2 = rawText.match(/(19|20)\d{2}[.-]\d{2}[.-]\d{2}/);
+        if (birthMatch2) {
+          birth = birthMatch2[0].replace(/-/g, '.');
+        } else {
+          const birthMatch3 = rawText.match(/(\d{2,4})년생/);
+          if (birthMatch3) birth = birthMatch3[1] + "년생";
+        }
       }
     }
   }
 
-  // 4. Skills extraction
+  // D. Skills extraction
   const skillSelectors = ['.wrap_tag', '.list_skill', '.skill-tag', '.skills', '[class*="skill"]', '.tag_skill'];
   for (let s of skillSelectors) {
     const el = document.querySelector(s);
@@ -511,7 +550,7 @@ function scrapeLocalFrameData() {
     }
   }
 
-  // 5. Experience info
+  // E. Experience info
   const expSelectors = ['.career_info', '.total_career', '.career-term', '.work-exp', '[class*="career"]', '[class*="experience"]'];
   for (let s of expSelectors) {
     const el = document.querySelector(s);
@@ -532,7 +571,7 @@ function scrapeLocalFrameData() {
     }
   }
 
-  // 6. Cover letter (self-intro)
+  // F. Cover letter (self-intro)
   const clSelectors = ['.self_intro', '#selfIntro', '.self_introduction', '.intro-box', '.portfolio_intro', '.introduction', '[class*="intro"]'];
   for (let s of clSelectors) {
     const el = document.querySelector(s);
@@ -545,7 +584,7 @@ function scrapeLocalFrameData() {
   return { name, phone, email, birth, age, skills, experience, coverLetter, rawText, title };
 }
 
-// 6. Generic Premium Result Modal Helper inside target page
+// 7. Generic Premium Result Modal Helper inside target page
 function showResultModal(title, content) {
   const oldModal = document.querySelector('.hauto-result-modal');
   if (oldModal) oldModal.remove();
@@ -587,56 +626,51 @@ function showResultModal(title, content) {
   });
 }
 
-// 7. Instant Local Excel (CSV) Download Handler
+// 8. Instant Local Excel (CSV) Download Handler
 function handleExcelDownload() {
-  chrome.runtime.sendMessage({ action: 'GET_MERGED_RESUME_DATA' }, (response) => {
-    if (response && response.success && response.data) {
-      const resumeData = response.data;
-      if (!resumeData.name || resumeData.name === "미탐지_후보자") {
-        alert('후보자 정보를 화면에서 파싱하지 못했습니다. 채용 포탈의 이력서 보기 화면이 맞는지 확인해 주세요.');
-        return;
-      }
+  requestMergedResumeData((resumeData) => {
+    if (!resumeData.name || resumeData.name === "미탐지_후보자") {
+      alert('후보자 정보를 화면에서 파싱하지 못했습니다. 채용 포탈의 이력서 보기 화면이 맞는지 확인해 주세요.');
+      return;
+    }
 
-      // Create CSV Content with BOM (prevents Korean character corruption in MS Excel)
-      const headers = ["등록일", "이름", "연락처", "이메일", "생년월일", "나이", "주요 기술", "경력 정보", "진행상태", "상태 변경일", "비고"];
-      const dateStr = new Date().toLocaleDateString('ko-KR');
-      
-      const clean = (val) => {
-        if (!val) return "";
-        return `"${val.replace(/"/g, '""').replace(/[\r\n\t]/g, ' ')}"`;
-      };
+    // Create CSV Content with BOM (prevents Korean character corruption in MS Excel)
+    const headers = ["등록일", "이름", "연락처", "이메일", "생년월일", "나이", "주요 기술", "경력 정보", "진행상태", "상태 변경일", "비고"];
+    const dateStr = new Date().toLocaleDateString('ko-KR');
+    
+    const clean = (val) => {
+      if (!val) return "";
+      return `"${val.replace(/"/g, '""').replace(/[\r\n\t]/g, ' ')}"`;
+    };
 
-      const row = [
-        clean(dateStr),
-        clean(resumeData.name),
-        clean(resumeData.phone),
-        clean(resumeData.email),
-        clean(resumeData.birth), 
-        clean(resumeData.age),   
-        clean(resumeData.skills),
-        clean(resumeData.experience),
-        clean("제안 수락 대기"),
-        clean(dateStr), 
-        clean("") 
-      ];
+    const row = [
+      clean(dateStr),
+      clean(resumeData.name),
+      clean(resumeData.phone),
+      clean(resumeData.email),
+      clean(resumeData.birth), 
+      clean(resumeData.age),   
+      clean(resumeData.skills),
+      clean(resumeData.experience),
+      clean("제안 수락 대기"),
+      clean(dateStr), 
+      clean("") 
+    ];
 
-      const csvContent = "\ufeff" + headers.join(",") + "\n" + row.join(",");
-      
-      try {
-        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement("a");
-        link.setAttribute("href", url);
-        link.setAttribute("download", `HAuto_후보자_${resumeData.name.replace(/[\s/]/g, '_')}.csv`);
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
-        URL.revokeObjectURL(url);
-      } catch (err) {
-        alert('엑셀 다운로드 실패: ' + err.message);
-      }
-    } else {
-      alert('이력서 데이터 실시간 수집 실패: ' + (response ? response.error : '로딩 대기 중입니다. 새로고침 후 다시 시도해 주세요.'));
+    const csvContent = "\ufeff" + headers.join(",") + "\n" + row.join(",");
+    
+    try {
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.setAttribute("href", url);
+      link.setAttribute("download", `HAuto_후보자_${resumeData.name.replace(/[\s/]/g, '_')}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert('엑셀 다운로드 실패: ' + err.message);
     }
   });
 }
