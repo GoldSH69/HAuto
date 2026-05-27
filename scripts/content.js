@@ -20,8 +20,8 @@ window.addEventListener('message', (event) => {
         data: localData
       });
 
-      // 2단계: ⚡[릴레이 엔진] 자신의 DOM 자식들 중 또 다른 하위 iframe이 존재하면 똑같은 postMessage를 재전파!
-      const subIframes = document.querySelectorAll('iframe');
+      // 2단계: ⚡[릴레이 엔진] 자신의 DOM 자식들(Shadow DOM 포함) 중 또 다른 하위 iframe이 존재하면 똑같은 postMessage를 재전파!
+      const subIframes = findAllIframes(document);
       subIframes.forEach((sub) => {
         try {
           if (sub.contentWindow) {
@@ -259,6 +259,29 @@ function bindPanelEvents(pageType) {
   }
 }
 
+// 💥 [지구 끝까지 수색하는 Shadow DOM 관통형 iframe 검색기]
+// 일반 쿼리셀렉터가 뚫지 못하는 open Shadow DOM 장벽 안쪽까지 재귀적으로 파고들어 모든 iframe 엘리먼트를 사냥합니다.
+function findAllIframes(root = document) {
+  let list = [];
+  try {
+    // 1. 현재 루트에서 모든 직접 노출된 iframe 수집
+    const directIframes = root.querySelectorAll('iframe');
+    directIframes.forEach(iframe => list.push(iframe));
+    
+    // 2. 현재 루트의 모든 요소를 뒤져 Shadow DOM 내부 추적
+    const allElements = root.querySelectorAll('*');
+    allElements.forEach(el => {
+      if (el.shadowRoot) {
+        // shadowRoot 내부를 다시 탐색하여 병합
+        list = list.concat(findAllIframes(el.shadowRoot));
+      }
+    });
+  } catch (err) {
+    console.log('HAuto Shadow DOM 탐색 중 예외 스킵:', err.message);
+  }
+  return list;
+}
+
 // 4. Unified Data Requester Broker (Fires postMessage with recursive relay to capture nested cross-origin iframes)
 function requestMergedResumeData(callback) {
   // A. Direct report from top-level parent frame itself
@@ -272,9 +295,9 @@ function requestMergedResumeData(callback) {
     console.log('HAuto 부모 프레임 데이터 선제 보고 오류:', e.message);
   }
 
-  // B. 💥 [Same-Origin Bypasser with Recursive Relay] 
-  // Send direct postMessage broadcasting to ALL top-level iframe elements in the parent DOM
-  const iframes = document.querySelectorAll('iframe');
+  // B. 💥 [Same-Origin Bypasser with Shadow DOM & Recursive Relay] 
+  // Send direct postMessage broadcasting to ALL iframe elements in the entire DOM (including Shadow DOM)
+  const iframes = findAllIframes(document);
   iframes.forEach((iframe) => {
     try {
       if (iframe.contentWindow) {
@@ -538,7 +561,7 @@ function scrapeLocalFrameData() {
       if (ageMatch2) age = ageMatch2[2] + "세";
     }
 
-    const birthMatchSpecial = rawText.match(/(\d{4})\s*\(\s*\d{2}세/);
+    const birthMatchSpecial = rawText.match(/(\d{4})\s*\(\s/\d{2}세/);
     if (birthMatchSpecial) {
       birth = birthMatchSpecial[1] + "년";
     } else {
@@ -717,8 +740,8 @@ function handleExcelDownload() {
 function startMonitorUpdating() {
   // Update loop: every 3.0s to dynamically adjust to portal page content
   setInterval(() => {
-    // A. Broadcast sub-frame postMessages dynamically to gather DOM text in real time
-    const iframes = document.querySelectorAll('iframe');
+    // A. Broadcast sub-frame postMessages dynamically to gather DOM text in real time (using recursive Shadow DOM selector)
+    const iframes = findAllIframes(document);
     iframes.forEach((iframe) => {
       try {
         if (iframe.contentWindow) {
@@ -748,6 +771,14 @@ function showDebugModal(resumeData) {
   // Remove existing
   const oldModal = document.querySelector('.hauto-debug-modal');
   if (oldModal) oldModal.remove();
+
+  // Gather frame diagnostics to include in debug info
+  const frames = findAllIframes(document);
+  let debugMeta = `[HAuto 프레임 진단 로그]\n- 탐지된 총 iframe 개수: ${frames.length}개\n`;
+  frames.forEach((f, idx) => {
+    debugMeta += `  [iframe #${idx}] src: "${f.getAttribute('src') || 'src 없음'}", id: "${f.id || 'id 없음'}", class: "${f.className || 'class 없음'}"\n`;
+  });
+  debugMeta += `--------------------------------------------------\n\n`;
 
   const modal = document.createElement('div');
   modal.className = 'hauto-debug-modal';
@@ -782,7 +813,7 @@ function showDebugModal(resumeData) {
         현재 비서가 화면 내 모든 프레임(iframe 포함)에서 긁어온 <strong>실시간 전체 텍스트</strong>는 아래와 같습니다. 아래 상자 안의 텍스트를 전체 복사하여 채팅창에 붙여넣어 주시면 즉시 정밀 튜닝해 드리겠습니다!
       </p>
     </div>
-    <textarea style="width:100%; height:220px; background-color:#08030c; color:#38bdf8; border:1px solid #3b204c; border-radius:8px; padding:12px; font-size:11px; font-family:monospace; resize:none; margin-bottom:16px;" readonly>${resumeData.rawText || '(수집된 텍스트가 완전히 비어 있습니다)'}</textarea>
+    <textarea style="width:100%; height:220px; background-color:#08030c; color:#38bdf8; border:1px solid #3b204c; border-radius:8px; padding:12px; font-size:11px; font-family:monospace; resize:none; margin-bottom:16px;" readonly>${debugMeta}${resumeData.rawText || '(수집된 텍스트가 완전히 비어 있습니다)'}</textarea>
     <div style="display:flex; justify-content:flex-end; gap:10px;">
       <button class="debug-copy-btn" style="background-color:#ef4444; border:none; color:#fff; font-size:11px; font-weight:600; padding:9px 16px; border-radius:8px; cursor:pointer;">디버그 텍스트 복사하기</button>
       <button class="debug-close-btn" style="background-color:#1d1226; border:1px solid #3b204c; color:#cbd5e1; font-size:11px; font-weight:600; padding:9px 16px; border-radius:8px; cursor:pointer;">닫기</button>
@@ -796,7 +827,7 @@ function showDebugModal(resumeData) {
   modal.querySelector('.debug-close-btn').addEventListener('click', close);
 
   modal.querySelector('.debug-copy-btn').addEventListener('click', () => {
-    navigator.clipboard.writeText(resumeData.rawText).then(() => {
+    navigator.clipboard.writeText(debugMeta + resumeData.rawText).then(() => {
       const btn = modal.querySelector('.debug-copy-btn');
       btn.textContent = '복사 완료! 채팅창에 붙여넣어 주세요.';
       btn.style.backgroundColor = '#10B981';
