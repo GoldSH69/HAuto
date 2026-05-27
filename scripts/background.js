@@ -14,8 +14,43 @@ const DEFAULT_PROMPTS = {
   competency: `[고객사 채용 JD]:\n{{JD}}\n\n[후보자 이력서]:\n{{이력서}}\n\n[후보자 자기소개서]:\n{{자소서}}\n\n위의 자료를 종합하여, 아래의 양식에 맞추어 후보자의 핵심역량과 자소서 핵심 포인트를 추출해줘. 양식을 정확히 준수하고, 절대 원문에 기재되지 않은 허위 사실이나 과장된 능력을 지어내지 말 것.\n\n[추출 양식]\n1. JD 매칭 핵심역량 요약 (경력 및 프로젝트 기반 3가지):\n2. 자기소개서 기반 지원동기 요약 (3줄 이내):\n3. 입사 후 포부 핵심 정제 (3줄 이내):`
 };
 
+// Global memory to store multi-frame scraping data per tab
+const tabFramesData = {};
+
+// Clean up memory on tab close or reload
+chrome.tabs.onRemoved.addListener((tabId) => {
+  delete tabFramesData[tabId];
+});
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status === 'loading') {
+    delete tabFramesData[tabId];
+  }
+});
+
 // Listen to message routing from Content Scripts
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  if (message.action === 'REPORT_FRAME_DATA') {
+    const tabId = sender.tab?.id;
+    const frameId = sender.frameId;
+    if (tabId !== undefined && frameId !== undefined) {
+      tabFramesData[tabId] = tabFramesData[tabId] || {};
+      tabFramesData[tabId][frameId] = message.data;
+    }
+    sendResponse({ success: true });
+    return true;
+  }
+
+  if (message.action === 'GET_MERGED_RESUME_DATA') {
+    const tabId = sender.tab?.id;
+    if (tabId !== undefined && tabFramesData[tabId]) {
+      const merged = mergeResumeData(Object.values(tabFramesData[tabId]));
+      sendResponse({ success: true, data: merged });
+    } else {
+      sendResponse({ success: false, error: '프레임 데이터가 아직 백그라운드에 수집되지 않았습니다. 뷰어 화면을 새로고침 해주세요.' });
+    }
+    return true;
+  }
+
   if (message.action === 'EXTRACT_JD_KEYWORDS') {
     callGeminiApi('step1', { JD: message.text })
       .then(result => sendResponse({ success: true, data: result }))
@@ -251,4 +286,189 @@ async function saveToNotion(token, databaseId, candidate) {
   }
 
   return true;
+}
+
+// 3. Multi-frame candidate data merger (Bypasses same-origin restrictions by merging properties)
+function mergeResumeData(framesArray) {
+  let name = '';
+  let phone = '';
+  let email = '';
+  let birth = '';
+  let age = '';
+  let skills = '';
+  let experience = '';
+  let coverLetter = '';
+  let rawText = '';
+
+  const nameBlacklist = ["합격", "불합", "탈락", "서류", "면접", "진행", "결과", "상태", "이름", "성명", "인재", "포탈", "회원", "관리", "인재풀", "대기", "나이", "성별", "지원", "전형", "채용", "이력", "포지션", "구직", "구인", "이메일", "연락처", "전화", "컨설턴트"];
+  const isInvalidName = (n) => !n || n.trim() === "" || n.includes('미탐지') || n.includes('후보자') || n.length > 5 || nameBlacklist.some(b => n.includes(b));
+
+  // 1. Combine rawText from all frames
+  rawText = framesArray.map(f => f.rawText || '').join('\n\n');
+
+  // 2. Merge Name: find the first valid non-blacklist name
+  for (let f of framesArray) {
+    if (f.name && !isInvalidName(f.name)) {
+      name = f.name.trim();
+      break;
+    }
+  }
+
+  // Title reverse tracking fallback
+  if (isInvalidName(name)) {
+    for (let f of framesArray) {
+      if (f.title) {
+        let cleanTitle = f.title.replace(/(이력서|사람인|잡코리아|JOBKOREA|saramin|포트폴리오|열람|보기|관리|상세|인재풀|인재|검색|후보자|목록|후|내역|다운로드|불합격|합격|서류|면접|최종|진행|상태|결과|통보|컨설턴트|[-|[\]()|:\s])/gi, '').trim();
+        const krNameMatch = cleanTitle.match(/[가-힣]{2,4}/);
+        if (krNameMatch && !isInvalidName(krNameMatch[0])) {
+          name = krNameMatch[0];
+          break;
+        }
+      }
+    }
+  }
+
+  // Regex patterns reverse tracking fallback
+  if (isInvalidName(name)) {
+    const namePattern = /(이름|성명)\s*[:\s]\s*([가-힣*]{2,4})/i;
+    const matchA = rawText.match(namePattern);
+    if (matchA && matchA[2] && !isInvalidName(matchA[2])) {
+      name = matchA[2].trim();
+    }
+  }
+  if (isInvalidName(name)) {
+    const agePattern = /([가-힣*]{2,4})\s*\(\s*(남|여)?\s*,?\s*\d{2}세?\s*\)/;
+    const matchB = rawText.match(agePattern);
+    if (matchB && matchB[1] && !isInvalidName(matchB[1])) {
+      name = matchB[1].trim();
+    }
+  }
+  if (isInvalidName(name)) {
+    const birthPattern = /([가-힣*]{2,4})\s*(\/)?\s*\d{2,4}년생/;
+    const matchC = rawText.match(birthPattern);
+    if (matchC && matchC[1] && !isInvalidName(matchC[1])) {
+      name = matchC[1].trim();
+    }
+  }
+  if (isInvalidName(name)) {
+    const phoneIndex = rawText.indexOf("010");
+    if (phoneIndex !== -1) {
+      const nearText = rawText.substring(Math.max(0, phoneIndex - 100), phoneIndex);
+      const nearKrMatch = nearText.match(/[가-힣]{2,4}/g);
+      if (nearKrMatch && nearKrMatch.length > 0) {
+        for (let i = nearKrMatch.length - 1; i >= 0; i--) {
+          const possibleName = nearKrMatch[i];
+          if (!isInvalidName(possibleName)) {
+            name = possibleName;
+            break;
+          }
+        }
+      }
+    }
+  }
+
+  if (isInvalidName(name)) {
+    name = "미탐지_후보자";
+  }
+
+  // 3. Merge Phone Contact
+  for (let f of framesArray) {
+    if (f.phone && f.phone.trim().length > 0) {
+      phone = f.phone.trim();
+      break;
+    }
+  }
+  if (!phone) {
+    const phoneMatch = rawText.match(/010[-.\s]?\d{3,4}[-.\s]?\d{4}/);
+    phone = phoneMatch ? phoneMatch[0] : '';
+  }
+
+  // 4. Merge Email
+  for (let f of framesArray) {
+    if (f.email && f.email.trim().length > 0) {
+      email = f.email.trim();
+      break;
+    }
+  }
+  if (!email) {
+    const emailMatch = rawText.match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/);
+    email = emailMatch ? emailMatch[0] : '';
+  }
+
+  // 5. Merge Birth Date
+  for (let f of framesArray) {
+    if (f.birth && f.birth.trim().length > 0 && !f.birth.includes('미표시') && f.birth !== '미탐지') {
+      birth = f.birth.trim();
+      break;
+    }
+  }
+  if (!birth || birth === '미탐지') {
+    const birthMatchSpecial = rawText.match(/(\d{4})\s*\(\s*\d{2}세/);
+    if (birthMatchSpecial) {
+      birth = birthMatchSpecial[1] + "년";
+    } else {
+      const birthMatch = rawText.match(/(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일/);
+      if (birthMatch) {
+        birth = `${birthMatch[1]}.${birthMatch[2].padStart(2, '0')}.${birthMatch[3].padStart(2, '0')}`;
+      } else {
+        const birthMatch2 = rawText.match(/(19|20)\d{2}[.-]\d{2}[.-]\d{2}/);
+        if (birthMatch2) {
+          birth = birthMatch2[0].replace(/-/g, '.');
+        } else {
+          const birthMatch3 = rawText.match(/(\d{2,4})년생/);
+          if (birthMatch3) birth = birthMatch3[1] + "년생";
+        }
+      }
+    }
+  }
+
+  // 6. Merge Age
+  for (let f of framesArray) {
+    if (f.age && f.age.trim().length > 0 && !f.age.includes('미표시') && f.age !== '미탐지') {
+      age = f.age.trim();
+      break;
+    }
+  }
+  if (!age || age === '미탐지') {
+    const ageMatch = rawText.match(/(\d{2})세/);
+    if (ageMatch) {
+      age = ageMatch[1] + "세";
+    } else {
+      const ageMatch2 = rawText.match(/\(\s*(남|여)?\s*,?\s*(\d{2})\s*\)/);
+      if (ageMatch2) age = ageMatch2[2] + "세";
+    }
+  }
+
+  // 7. Merge Skills & Work Experience
+  let maxSkillLen = -1;
+  for (let f of framesArray) {
+    const s = f.skills || '';
+    if (s.length > maxSkillLen && !s.includes('미표시') && !s.includes('미탐지')) {
+      skills = s;
+      maxSkillLen = s.length;
+    }
+  }
+  if (!skills) skills = "화면 내 기술스택 미표시 (상세내용 참고)";
+
+  let maxExpLen = -1;
+  for (let f of framesArray) {
+    const e = f.experience || '';
+    if (e.length > maxExpLen && !e.includes('미표시') && !e.includes('미탐지')) {
+      experience = e;
+      maxExpLen = e.length;
+    }
+  }
+  if (!experience) experience = "화면 내 경력정보 미표시 (상세내용 참고)";
+
+  // 8. Merge Cover Letter
+  let maxClLen = -1;
+  for (let f of framesArray) {
+    const c = f.coverLetter || '';
+    if (c.length > maxClLen && !c.includes('미탐지')) {
+      coverLetter = c;
+      maxClLen = c.length;
+    }
+  }
+
+  return { name, phone, email, birth, age, skills, experience, coverLetter, rawText };
 }
